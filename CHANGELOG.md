@@ -1,5 +1,11 @@
 # Changelog
 
+## [4.4.1] 2026-01-28
+
+### Fixed
+
+- Updated plugin file name in `afk_manager.inc`.
+
 ## [4.4.0] 2026-01-28
 
 ### Changed

@@ -110,7 +110,7 @@ forward void AFKM_OnClientBack(int client);
 public SharedPlugin __pl_afkmanager = 
 {
 	name = "afkmanager",
-	file = "afk_manager4.smx",
+	file = "afk_manager.smx",
 #if defined REQUIRE_PLUGIN
 	required = 1
 #else

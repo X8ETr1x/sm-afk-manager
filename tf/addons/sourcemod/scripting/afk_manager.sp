@@ -1,332 +1,465 @@
-/**
- * vim: set ts=4 :
- * =============================================================================
- * AFK Manager
- * Handles AFK Players
- *
- * SourceMod (C)2004-2007 AlliedModders LLC.  All rights reserved.
- * =============================================================================
- *
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License, version 3.0, as published by the
- * Free Software Foundation.
- * 
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS6
- * FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
- * details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- * As a special exception, AlliedModders LLC gives you permission to link the
- * code of this program (as well as its derivative works) to "Half-Life 2," the
- * "Source Engine," the "SourcePawn JIT," and any Game MODs that run on software
- * by the Valve Corporation.  You must obey the GNU General Public License in
- * all respects for all other code used.  Additionally, AlliedModders LLC grants
- * this exception to all derivative works.  AlliedModders LLC defines further
- * exceptions, found in LICENSE.txt (as of this writing, version JULY-31-2007),
- * or <http://www.sourcemod.net/license.php>.
- *
- */
-
-#pragma semicolon							1
 #include <sourcemod>
 #include <sdktools>
 
+#undef REQUIRE_EXTENSIONS
+#include <tf2>
+#define REQUIRE_EXTENSIONS
+
+#pragma semicolon 1
+
 #undef REQUIRE_PLUGIN
-#if ( ((SOURCEMOD_V_MAJOR == 1) && (SOURCEMOD_V_MINOR >= 5)) || (SOURCEMOD_V_MAJOR > 1) )
-	#tryinclude <multicolors>
-	#if !defined _mutlicolors_included
-		#tryinclude <morecolors>
-	#endif
+#tryinclude <multicolors>
+#if !defined _mutlicolors_included
+	#tryinclude <morecolors>
 #endif
 #if ((!defined _mutlicolors_included) && (!defined _colors_included))
 	#tryinclude <colors>
 #endif
-#tryinclude <autoupdate>
 #tryinclude <updater>
 #define REQUIRE_PLUGIN
 
-// Arena Check Code from controlpoints.inc made by Powerlord
+#pragma newdecls required
 
-// These correspond to tf_gamerules m_nGameType netprop
+// Observer Modes
+#define OBS_MODE_NONE 		0
+#define	OBS_MODE_DEATHCAM 	1
+#define OBS_MODE_FREEZECAM	2
+/*
+OBS_MODE_FIXED = 3
+OBS_MODE_IN_EYE = 4
+OBS_MODE_CHASE = 5
+OBS_MODE_POI = 6
+*/
+int	OBS_MODE_ROAMING =		6;
+
+/**
+ * Specifies AFK immunity types.
+ */
+enum AFKImmunity:
+{
+	AFKImmunity_None = 0,
+	AFKImmunity_Move = 1,
+	AFKImmunity_Kick = 2,
+	AFKImmunity_Full = 3,
+};
+
+
+// Arena Check Code from controlpoints.inc made by Powerlord
 enum
 {
-	TF2_GameType_Unknown,
-	TF2_GameType_CTF = 1,
-	TF2_GameType_CP = 2,
-	TF2_GameType_PL = 3,
-	TF2_GameType_Arena = 4,
+	TF2GameType_Unknown,
+	TF2GameType_CTF,
+	TF2GameType_CP,
+	TF2GameType_PL,
+	TF2GameType_Arena,
 }
 
-enum TF2_GameMode
+
+enum TF2GameMode:
 {
-	TF2_GameMode_Unknown,
-	TF2_GameMode_CTF,
-	TF2_GameMode_5CP,
-	TF2_GameMode_PL,
-	TF2_GameMode_Arena,
-	TF2_GameMode_ADCP,
-	TF2_GameMode_TC,
-	TF2_GameMode_PLR,
-	TF2_GameMode_KOTH,
-	TF2_GameMode_SD,
-	TF2_GameMode_MvM,
-	TF2_GameMode_Training,
-	TF2_GameMode_ItemTest,
+	TF2GameMode_Unknown,		/**< Unknown type, unknown mode */
+	TF2GameMode_CTF,			/**< General CTF */
+	TF2GameMode_CP_AD,			/**< Attack/Defense Control Points */
+	TF2GameMode_CP_Symmetric,	/**< 5CP or unknown Control Points */
+	TF2GameMode_TC,				/**< Territory Control CP */
+	TF2GameMode_PL,				/**< General Payload */
+	TF2GameMode_Arena,			/**< Arena */
+	TF2GameMode_ItemTest,		/**< Unknown type, Item Test mode */
+	TF2GameMode_Koth,			/**< KOTH Control Points */
+	TF2GameMode_HybridCTFCP,	/**< Hybrid CTF/CP mode */
+	TF2GameMode_PLR,			/**< Payload Race, 2 team payload */
+	TF2GameMode_Training,		/**< Unknown type, training mode */
+	TF2GameMode_SD,				/**< CTF, Special Delivery */
+	TF2GameMode_MvM,			/**< CTF, Mann Vs. Machine */
+	TF2GameMode_RD,				/**< CTF, Robot Destruction */
 }
 
-stock TF2_GameMode:TF2_DetectGameMode()
+
+stock TF2GameMode TF2_DetectGameMode()
 {
-	
-	// Netprops didn't help, lets check the game type
-	new gameType = GameRules_GetProp("m_nGameType");
+	int gameType = GameRules_GetProp("m_nGameType");
 	
 	switch (gameType)
 	{
-		case TF2_GameType_Arena:
-		{
-			return TF2_GameMode_Arena;
-		}
+		case TF2GameType_Arena:
+			return TF2GameMode_Arena;
 	}
-	return TF2_GameMode_Unknown;
+	return TF2GameMode_Unknown;
 }
 
-#if SOURCEMOD_V_MAJOR == 1
-	#if SOURCEMOD_V_MINOR >= 5
-		#define NEW_ENGINE_DETECTION
-	#endif
-#elseif SOURCEMOD_V_MAJOR > 1
-	#define NEW_ENGINE_DETECTION
-#endif
-
+// Defines
 #if defined _updater_included
-#define UPDATE_URL							"http://afkmanager.dawgclan.net/updatefile.txt"
+#define UPDATE_URL										"http://afkmanager.dawgclan.net/afkmanager4.txt"
 #endif
 
-// To Do?
-// Sound
-// AFK Menu
-// Fix AFK in Class Menu (State 3?)
-// Check both Eye Angles and Location
-// Fix Spectator Mode (Random Spec)
-// Check Spectator Mode when Unassigned
-// Review ND https://forums.alliedmods.net/showpost.php?p=2017228&postcount=1329
+#define AFKM_VERSION									"4.3.0"
 
-// Check WFP Event compatible with ND? https://gist.github.com/yedpodtrzitk...d1fc/revisions
+// TO DO:
+// Fix WFP Events
+// Add Sound?
+// Add AFK Menu?
+// Check ND Support?
 
-
-#define AFKM_VERSION								"3.6.2"
-
-#define AFK_CHECK_INTERVAL							5.0
+#define AFK_WARNING_INTERVAL							5
+#define AFK_CHECK_INTERVAL								1.0
 
 // Change this to enable debug
-// 0 = No Logging
-// 1 = Minimal Logging
-// 2 = Maximum Logging
-#define _DEBUG 										0 // set to 1 to enable debug or 3 to enable full debug
-#define _DEBUG_MODE									1 // 1 = Log to File, 2 = Log to Game Logs, 3 = Print to Chat, 4 = Print to Console
-
-
-// SHOULD NOT NEED TO EDIT BELOW THIS LINE
-// Event Defines
-#define EVENT_PLAYER_TEAM							0
-#define EVENT_PLAYER_SPAWN							1
-#define EVENT_PLAYER_DEATH							2
-#define EVENT_TEAMPLAY_ROUND_START					3
-#define EVENT_ARENA_ROUND_START						4
-#define EVENT_ROUND_STALEMATE						5
-
-// Event Array
-new bool:bEventIsHooked[6] =						{ false, ...};
-
-// ConVar Defines
-#define CONVAR_VERSION								0
-#define CONVAR_ENABLED								1
-#define CONVAR_WARNINGS								2
-#define CONVAR_EXCLUDEBOTS							3
-#define CONVAR_MOD_AFK								4
-#define CONVAR_TF2_ARENAMODE						5
+#define _DEBUG 											0 // 1 = Minimum Debug 3 = Full Debug
+#define _DEBUG_MODE										1 // 1 = Log to File, 2 = Log to Game Logs, 3 = Print to Chat, 4 = Print to Console
 
 #if !defined MAX_MESSAGE_LENGTH
-	#define MAX_MESSAGE_LENGTH						250
+	#define MAX_MESSAGE_LENGTH							250
 #endif
 
-// ConVar Array
-new bool:bCvarIsHooked[6] =							{ false, ...};
+#define SECONDS_IN_DAY									86400
 
+#define LOG_FOLDER										"logs"
+#define LOG_PREFIX										"afkm_"
+#define LOG_EXT											"log"
+
+// ConVar Defines
+#define CONVAR_VERSION									0
+#define CONVAR_ENABLED									1
+#define CONVAR_MOD_AFK									2
+#define CONVAR_PREFIXSHORT								3
+#define CONVAR_PREFIXCOLORS								4
+#define CONVAR_LANGUAGE									5
+#define CONVAR_LOG_WARNINGS								6
+#define CONVAR_MINPLAYERSMOVE							7
+#define CONVAR_MINPLAYERSKICK							8
+#define CONVAR_ADMINS_IMMUNE							9
+#define CONVAR_TIMETOMOVE								10
+#define CONVAR_TIMETOKICK								11
+#define CONVAR_EXCLUDEDEAD								12
+#define CONVAR_TF2_ARENAMODE							13
+#define CONVAR_BUTTONSBUFFER							14
+#define CONVAR_ARRAY_SIZE								15
+
+// Arrays
+char AFKM_LogFile[PLATFORM_MAX_PATH];					// Log File
+//Handle g_FWD_hPlugins =								INVALID_HANDLE; // Forward Plugin Handles
+int g_iPlayerUserID[MAXPLAYERS+1] =						{-1, ...}; // Player User ID
+Handle g_hAFKTimer[MAXPLAYERS+1] =						{INVALID_HANDLE, ...}; // AFK Timers
+int g_iAFKTime[MAXPLAYERS+1] =							{-1, ...}; // Initial Time of AFK
+int g_iSpawnTime[MAXPLAYERS+1] =						{-1, ...}; // Time of Spawn
+int g_iPlayerTeam[MAXPLAYERS+1] =						{-1, ...}; // Player Team
+int iPlayerAttacker[MAXPLAYERS+1] =						{-1, ...}; // Player Attacker
+int iObserverMode[MAXPLAYERS+1] =						{-1, ...}; // Observer Mode
+int iObserverTarget[MAXPLAYERS+1] =						{-1, ...}; // Observer Target
+AFKImmunity g_iPlayerImmunity[MAXPLAYERS+1] =			{AFKImmunity_None, ...}; // Player Immunity
+//int iMouse[MAXPLAYERS+1[2];							// X = Verital, Y = Horizontal
+bool bPlayerAFK[MAXPLAYERS+1] =							{true, ...}; // Player AFK Status
+bool bPlayerDeath[MAXPLAYERS+1] =						{false, ...};
+//float fEyeAngles[MAXPLAYERS+1][3];					// X = Vertical, Y = Height, Z = Horizontal
+int g_iMapEndTime =										-1;
+
+#define BUTTONS_MAX_ARRAY								30
+int iButtonsArrayIndex[MAXPLAYERS+1] =					{0, ...}; // Button Array Index
+int iButtonsArray[MAXPLAYERS+1][BUTTONS_MAX_ARRAY];		// Array of client bitsum of buttons pressed
+
+
+bool bCvarIsHooked[CONVAR_ARRAY_SIZE] =					{false, ...}; // Console Variable Hook Status
 
 // Global Variables
-// Log File Array
-new String:AFKM_LogFile[PLATFORM_MAX_PATH];
-
-new Float:fAFKTime[MAXPLAYERS+1] =					{0.0, ...};
-
-new Float:fEyePosition[MAXPLAYERS+1][3]; // X = Vertical, Y = Height, Z = Horizontal
-new Float:fMapPosition[MAXPLAYERS+1][3];
-
-new iPlayerAttacker[MAXPLAYERS+1] =					{-1, ...};
-
-new iSpecMode[MAXPLAYERS+1] =						{0, ...};
-new iSpecTarget[MAXPLAYERS+1] =						{0, ...};
-
-new iPlayerTeam[MAXPLAYERS+1] =						{-1, ...};
-new iTeamPlayers[MAXPLAYERS+1] =					{0, ...};
-
-new bool:bJoinedTeam[MAXPLAYERS+1] =				{false, ...};
-
-new iSpawnTime[MAXPLAYERS+1] =						{-1, ...};
-
-// Variables
-new bool:bLogWarnings =								false;
-new bool:bExcludeBots = 							false;
-
-new iNumPlayers =									0;
-
-new g_TF2_WFP_StartTime =							0;
-
-new g_Spec_FL_Mode =								0;
-new g_sTeam_Index =									1;
-
-new bool:bTF2Arena =								false;
-new bool:bWaitRound =								false;
-
-new bool:bMovePlayers =								true;
-new bool:bKickPlayers =								true;
-
-
-// Handles
-// AFK Manager Console Variables
-new Handle:hCvarVersion =							INVALID_HANDLE;
-new Handle:hCvarEnabled =							INVALID_HANDLE;
-new Handle:hCvarAutoUpdate =						INVALID_HANDLE;
-new Handle:hCvarPrefixShort =						INVALID_HANDLE;
+bool g_bLateLoad = 										false;
+// Console Related Variables
+bool g_bEnabled =										false;
+char g_sPrefix[] =										"AFK Manager";
 #if defined _colors_included
-new Handle:hCvarPrefixColor =						INVALID_HANDLE;
+bool g_bPrefixColors =									false;
 #endif
-new Handle:hCvarLanguage =							INVALID_HANDLE;
-new Handle:hCvarLogWarnings =						INVALID_HANDLE;
-new Handle:hCvarLogMoves =							INVALID_HANDLE;
-new Handle:hCvarLogKicks =							INVALID_HANDLE;
-new Handle:hCvarLogDays =							INVALID_HANDLE;
-new Handle:hCvarMinPlayersMove =					INVALID_HANDLE;
-new Handle:hCvarMinPlayersKick =					INVALID_HANDLE;
-new Handle:hCvarAdminsImmune =						INVALID_HANDLE;
-new Handle:hCvarAdminsFlag =						INVALID_HANDLE;
-new Handle:hCvarMoveSpec =							INVALID_HANDLE;
-new Handle:hCvarMoveAnnounce =						INVALID_HANDLE;
-new Handle:hCvarSpecCheckTarget =					INVALID_HANDLE;
-new Handle:hCvarTimeToMove =						INVALID_HANDLE;
-new Handle:hCvarWarnTimeToMove =					INVALID_HANDLE;
-new Handle:hCvarKickPlayers =						INVALID_HANDLE;
-new Handle:hCvarKickAnnounce =						INVALID_HANDLE;
-new Handle:hCvarTimeToKick =						INVALID_HANDLE;
-new Handle:hCvarWarnTimeToKick =					INVALID_HANDLE;
-new Handle:hCvarSpawnTime =							INVALID_HANDLE;
-new Handle:hCvarWarnSpawnTime =						INVALID_HANDLE;
-new Handle:hCvarExcludeTeamChange =					INVALID_HANDLE;
-new Handle:hCvarExcludeBots =						INVALID_HANDLE;
-new Handle:hCvarExcludeDead =						INVALID_HANDLE;
-new Handle:hCvarLocationThreshold =					INVALID_HANDLE;
-new Handle:hCvarWarnUnassigned =					INVALID_HANDLE;
+bool g_bForceLanguage =									false;
+bool g_bLogWarnings =									false;
+bool g_bExcludeDead =									false;
+bool g_bTF2Arena =										false;
+int g_iAdminsImmunue =									-1;
+int g_iTimeToMove =										-1;
+int g_iTimeToKick =										-1;
+int g_iButtonsArraySize =								-1;
 
-// AFK Manager Timer Array
-new Handle:hAFKTimers[MAXPLAYERS+1] =				{INVALID_HANDLE, ...};
-new Handle:hAFKSpawnTimers[MAXPLAYERS+1] =			{INVALID_HANDLE, ...};
+// Status Variables
+bool bMovePlayers =										true;
+bool bKickPlayers =										true;
+bool g_bWaitRound =										true;
 
-// AFK Manager Menu Array
-//new Handle:hAFKMenu[MAXPLAYERS+1] =			{INVALID_HANDLE, ...};
-
-// Mod Based Console Variables
-new Handle:hCvarAFK =								INVALID_HANDLE;
-new Handle:hCvarTF2Arena =							INVALID_HANDLE;
-new Handle:hCvarTF2WFPTime =						INVALID_HANDLE;
-
+// Spectator Related Variables
+int g_iSpec_Team =										1;
 
 // Mod Detection Variables
-new bool:Synergy =									false;
-new bool:TF2 =										false;
-new bool:CSTRIKE =									false;
-//new bool:L4D =								false;
+bool Synergy =											false;
+bool TF2 =												false;
+bool CSTRIKE =											false;
+bool CSGO =												false;
+bool GESOURCE =											false;
 
+// Mod Based Console Variables
+ConVar hCvarAFK =										null;
+ConVar hCvarTF2Arena =									null;
 
-// General Defines
-//#define MOVE										0
-//#define KICK										1
+// Handles
+// Forwards
+Handle g_FWD_hOnInitializePlayer =						INVALID_HANDLE;
+Handle g_FWD_hOnAFKEvent =								INVALID_HANDLE;
+Handle g_FWD_hOnClientAFK =								INVALID_HANDLE;
+Handle g_FWD_hOnClientBack =							INVALID_HANDLE;
 
-#define TF2_TEAM_RED								2
-#define TF2_TEAM_BLUE								3
-
-
+// AFK Manager Console Variables
+ConVar hCvarVersion =									null;
+ConVar hCvarEnabled =									null;
+ConVar hCvarAutoUpdate =								null;
+ConVar hCvarPrefixShort =								null;
+#if defined _colors_included
+ConVar hCvarPrefixColor =								null;
+#endif
+ConVar hCvarLanguage =									null;
+ConVar hCvarLogWarnings =								null;
+ConVar hCvarLogMoves =									null;
+ConVar hCvarLogKicks =									null;
+ConVar hCvarLogDays =									null;
+ConVar hCvarMinPlayersMove =							null;
+ConVar hCvarMinPlayersKick =							null;
+ConVar hCvarAdminsImmune =								null;
+ConVar hCvarAdminsFlag =								null;
+ConVar hCvarMoveSpec =									null;
+ConVar hCvarMoveAnnounce =								null;
+ConVar hCvarTimeToMove =								null;
+ConVar hCvarWarnTimeToMove =							null;
+ConVar hCvarKickPlayers =								null;
+ConVar hCvarKickAnnounce =								null;
+ConVar hCvarTimeToKick =								null;
+ConVar hCvarWarnTimeToKick =							null;
+ConVar hCvarSpawnTime =									null;
+ConVar hCvarWarnSpawnTime =								null;
+ConVar hCvarExcludeDead =								null;
+ConVar hCvarWarnUnassigned =							null;
+ConVar hCvarButtonsBuffer =								null;
+#if _DEBUG
+ConVar hCvarLogDebug =									null;
+#endif
 
 // Plugin Information
-public Plugin:myinfo =
+public Plugin myinfo =
 {
     name = "AFK Manager",
     author = "Rothgar",
-    description = "Handles AFK Players",
+    description = "Takes action on AFK players",
     version = AFKM_VERSION,
     url = "http://www.dawgclan.net"
 };
 
-// Log Functions
-// Build Log File System Path & Call Log Purge
-BuildLogFilePath()
+// API
+void API_Init()
 {
-	// Check if SourceMod Log Folder Exists Otherwise Create One
-	new String:sLogPath[PLATFORM_MAX_PATH];
-	BuildPath(Path_SM, sLogPath, sizeof(sLogPath), "logs");
+	//CreateNative("AFKM_AddPlugin", Native_AddPlugin);
+	//CreateNative("AFKM_RemovePlugin", Native_RemovePlugin);
+	CreateNative("AFKM_SetClientImmunity", Native_SetClientImmunity);
+	CreateNative("AFKM_GetSpectatorTeam", Native_GetSpectatorTeam);
+	CreateNative("AFKM_IsClientAFK", Native_IsClientAFK);
+	CreateNative("AFKM_GetClientAFKTime", Native_GetClientAFKTime);
+	//g_FWD_hOnAFKEvent = CreateForward(ET_Event, Param_String, Param_Cell);
+	g_FWD_hOnInitializePlayer = CreateGlobalForward("AFKM_OnInitializePlayer", ET_Event, Param_Cell);
+	g_FWD_hOnAFKEvent = CreateGlobalForward("AFKM_OnAFKEvent", ET_Event, Param_String, Param_Cell);
+	g_FWD_hOnClientAFK = CreateGlobalForward("AFKM_OnClientAFK", ET_Ignore, Param_Cell);
+	g_FWD_hOnClientBack = CreateGlobalForward("AFKM_OnClientBack", ET_Ignore, Param_Cell);
+}
 
-	if ( !DirExists(sLogPath) )
+// Natives
+/*
+public int Native_AddPlugin(Handle plugin, int numParams) // native void AFKM_AddPlugin();
+{
+	AddPlugin(plugin);
+}
+
+public int Native_RemovePlugin(Handle plugin, int numParams) // native void AFKM_RemovePlugin();
+{
+	RemovePlugin(plugin);
+}
+*/
+
+public int Native_SetClientImmunity(Handle plugin, int numParams) // native void AFKM_SetClientImmunity(int client, AFKImmunity type);
+{
+	int iClient = GetNativeCell(1);
+	AFKImmunity iImmunityType = GetNativeCell(2);
+
+	if (iClient < 1 || iClient > MaxClients)
+		return ThrowNativeError(SP_ERROR_NATIVE, "Invalid client index (%d)", iClient);
+	else if (iImmunityType < AFKImmunity_None || iImmunityType > AFKImmunity_Full)
+		return ThrowNativeError(SP_ERROR_NATIVE, "Invalid Immunity Type (%d)", iImmunityType);
+	else
 	{
-		CreateDirectory(sLogPath, 511);
+		SetPlayerImmunity(iClient, view_as<int>(iImmunityType), true);
+
+		if (g_bLogWarnings)
+		{
+			char Plugin_Name[255];
+			if (GetPluginInfo(plugin, PlInfo_Name, Plugin_Name, sizeof(Plugin_Name)))
+			{
+				LogToFile(AFKM_LogFile, "AFK Manager Native: AFKM_SetClientImmunity has set client: %i immunity type to: %i by external plugin: %s", iClient, view_as<int>(iImmunityType), Plugin_Name);
+			}
+		}
+	}
+	return true;
+}
+
+public int Native_GetSpectatorTeam(Handle plugin, int numParams) // native int AFKM_GetSpectatorTeam();
+{
+	return g_iSpec_Team;
+}
+
+public int Native_IsClientAFK(Handle plugin, int numParams) // native bool AFKM_IsClientAFK(int client);
+{
+	int client = GetNativeCell(1);
+
+	if (client < 1 || client > MaxClients)
+		return ThrowNativeError(SP_ERROR_NATIVE, "Invalid client index (%d)", client);
+	else
+		return bPlayerAFK[client];
+}
+
+public int Native_GetClientAFKTime(Handle plugin, int numParams) // native int AFKM_GetClientAFKTime(int client);
+{
+	int client = GetNativeCell(1);
+
+	if (client < 1 || client > MaxClients)
+		return ThrowNativeError(SP_ERROR_NATIVE, "Invalid client index (%d)", client);
+	else if (g_iAFKTime[client] == -1)
+		return g_iAFKTime[client];
+	else
+		return (GetTime() - g_iAFKTime[client]);
+}
+
+// Forwards
+Action Forward_OnInitializePlayer(int client) // forward Action AFKM_OnInitializePlayer(int client);
+{
+	Action result;
+
+	Call_StartForward(g_FWD_hOnInitializePlayer); // Start Forward
+	Call_PushCell(client);
+	Call_Finish(result);
+
+	return result;
+}
+
+void Forward_OnClientAFK(int client) // forward void AFKM_OnClientAFK(int client);
+{
+	Call_StartForward(g_FWD_hOnClientAFK); // Start Forward
+	Call_PushCell(client);
+	Call_Finish();
+}
+
+void Forward_OnClientBack(int client) // forward void AFKM_OnClientBack(int client);
+{
+	Call_StartForward(g_FWD_hOnClientBack); // Start Forward
+	Call_PushCell(client);
+	Call_Finish();
+}
+
+/*
+Action Forward_Event(const char[] name, int client) // Internal Function to Loop Forward_OnAFKEvent()
+{
+	Action result = Plugin_Continue;
+
+	int maxPlugins = GetMaxPlugins();
+	for (int i = 0; i < maxPlugins; i++)
+	{
+		result = Forward_OnAFKEvent(g_FWD_hPlugins[i], name, client);
+		if (result != Plugin_Continue)
+		{
+			char Action_Name[64];
+			switch (result)
+			{
+				case Plugin_Continue:
+					Action_Name = "Plugin_Continue";
+				case Plugin_Changed:
+					Action_Name = "Plugin_Changed";
+				case Plugin_Handled:
+					Action_Name = "Plugin_Handled";
+				case Plugin_Stop:
+					Action_Name = "Plugin_Stop";
+				default:
+					Action_Name = "Plugin_Error";
+			}
+			char Plugin_Name[256],
+			GetPluginInfo(g_FWD_hPlugins[i], PlInfo_Name, Plugin_Name, sizeof(Plugin_Name));
+			LogToFile(AFKM_LogFile, "AFK Manager Event: %s has been requested to: %s by Plugin: %s this action will affect the plugin/event outcome.", name, Action_Name, Plugin_Name);
+			return result;
+		}
 	}
 
-	decl String:cTime[64];
-	FormatTime(cTime, sizeof(cTime), "logs/afkm_%Y%m%d.log");
+	return Plugin_Continue;
+}
 
-	new String:sLogFile[PLATFORM_MAX_PATH];
+Action Forward_OnAFKEvent(Handle plugin, const char[] name, int client) // forward Action AFKM_OnAFKEvent(const char[] name, int client);
+{
+	Action result = Plugin_Continue;
+	Function func = GetFunctionByName(plugin, "AFKM_OnAFKEvent");
+
+	if (func != INVALID_FUNCTION)
+	{
+		if (AddToForward(g_FWD_hOnAFKEvent, plugin, func))
+		{
+			Call_StartForward(g_FWD_hOnAFKEvent); // Start Forward
+			Call_PushString(name);
+			Call_PushCell(client);
+			Call_Finish(result);
+			RemoveAllFromForward(g_FWD_hOnAFKEvent, plugin);
+		}
+	} else
+		RemovePlugin(plugin); // Function is Invalid Remove Plugin
+
+	return result;
+}
+*/
+
+Action Forward_OnAFKEvent(const char[] name, int client) // forward Action AFKM_OnAFKEvent(const char[] name, int client);
+{
+	Action result;
+
+	Call_StartForward(g_FWD_hOnAFKEvent); // Start Forward
+	Call_PushString(name);
+	Call_PushCell(client);
+	Call_Finish(result);
+
+	return result;
+}
+
+
+// Log Functions
+void BuildLogFilePath() // Build Log File System Path
+{
+	char sLogPath[PLATFORM_MAX_PATH];
+	BuildPath(Path_SM, sLogPath, sizeof(sLogPath), LOG_FOLDER);
+
+	if ( !DirExists(sLogPath) ) // Check if SourceMod Log Folder Exists Otherwise Create One
+		CreateDirectory(sLogPath, 511);
+
+	char cTime[64];
+	FormatTime(cTime, sizeof(cTime), "%Y%m%d");
+
+	char sLogFile[PLATFORM_MAX_PATH];
 	sLogFile = AFKM_LogFile;
 
-	BuildPath(Path_SM, AFKM_LogFile, sizeof(AFKM_LogFile), cTime);
+	BuildPath(Path_SM, AFKM_LogFile, sizeof(AFKM_LogFile), "%s/%s%s.%s", LOG_FOLDER, LOG_PREFIX, cTime, LOG_EXT);
 
 #if _DEBUG
 	LogDebug(false, "BuildLogFilePath - AFK Log Path: %s", AFKM_LogFile);
 #endif
 
 	if (!StrEqual(AFKM_LogFile, sLogFile))
-	{
 		LogAction(0, -1, "[AFK Manager] Log File: %s", AFKM_LogFile);
-
-#if _DEBUG
-		LogDebug(false, "BuildLogFilePath - Log file has been rotated");
-#endif
-		if (hCvarLogDays != INVALID_HANDLE)
-		{
-			if (GetConVarInt(hCvarLogDays) > 0)
-			{
-#if _DEBUG
-				LogDebug(false, "BuildLogFilePath - Purging Old Log Files");
-#endif
-				PurgeOldLogs();
-			}
-		}
-	}
 }
 
-// Purge Old Log Files
-PurgeOldLogs()
+void PurgeOldLogs() // Purge Old Log Files
 {
 #if _DEBUG
 	LogDebug(false, "PurgeOldLogs - Purging Old Log Files");
 #endif
-	new String:sLogPath[PLATFORM_MAX_PATH];
-	new String:buffer[256];
-	new Handle:hDirectory = INVALID_HANDLE;
-	new FileType:type = FileType_Unknown;
+	char sLogPath[PLATFORM_MAX_PATH];
+	char buffer[256];
+	Handle hDirectory = INVALID_HANDLE;
+	FileType type = FileType_Unknown;
 
-	BuildPath(Path_SM, sLogPath, sizeof(sLogPath), "logs");
+	BuildPath(Path_SM, sLogPath, sizeof(sLogPath), LOG_FOLDER);
 
 #if _DEBUG
 	LogDebug(false, "PurgeOldLogs - Purging Old Log Files from: %s", sLogPath);
@@ -336,28 +469,21 @@ PurgeOldLogs()
 		hDirectory = OpenDirectory(sLogPath);
 		if (hDirectory != INVALID_HANDLE)
 		{
+			int iTimeOffset = GetTime() - ((SECONDS_IN_DAY * GetConVarInt(hCvarLogDays)) + 30);
 			while ( ReadDirEntry(hDirectory, buffer, sizeof(buffer), type) )
 			{
 				if (type == FileType_File)
 				{
-					if (StrContains(buffer, "afkm_", false) != -1)
+					if (StrContains(buffer, LOG_PREFIX, false) != -1)
 					{
-						decl String:file[PLATFORM_MAX_PATH];
+						char file[PLATFORM_MAX_PATH];
 						Format(file, sizeof(file), "%s/%s", sLogPath, buffer);
 #if _DEBUG
 						LogDebug(false, "PurgeOldLogs - Checking file: %s", buffer);
 #endif
-						if ( GetFileTime(file, FileTime_LastChange) < (GetTime() - (60 * 60 * 24 * GetConVarInt(hCvarLogDays)) + 30) )
-						{
-							// Log file is old
-#if _DEBUG
-							LogDebug(false, "PurgeOldLogs - Log File Should be Deleted: %s", buffer);
-#endif
+						if ( GetFileTime(file, FileTime_LastChange) < iTimeOffset ) // Log file is old
 							if (DeleteFile(file))
-							{
 								LogAction(0, -1, "[AFK Manager] Deleted Old Log File: %s", file);
-							}
-						}
 					}
 				}
 			}
@@ -371,127 +497,49 @@ PurgeOldLogs()
 	}
 }
 
-Move_PrintToChat(client, const String:szMessage[], any:...)
+// Chat Functions
+void AFK_PrintToChat(int client, const char[] sMessage, any:...)
 {
-	decl String:szBuffer[MAX_MESSAGE_LENGTH];
-	VFormat(szBuffer, sizeof(szBuffer), szMessage, 3);
+	int iStart = client;
+	int iEnd = MaxClients;
 
-	new Announce = GetConVarInt(hCvarMoveAnnounce);
-#if _DEBUG > 2
-	LogDebug(false, "Move_PrintToChat - Announce: %i", Announce);
-#endif
-	if (Announce == 0)
-		AFK_PrintToChat(client, szBuffer);
-	else if (Announce == 1)
-		AFK_PrintToChatAll(szBuffer);
+	if (client > 0)
+		iEnd = client;
 	else
+		iStart = 1;
+
+	char sBuffer[MAX_MESSAGE_LENGTH];
+
+	for (int i = iStart; i <= iEnd; i++)
 	{
-		for(new i = 1; i <= MaxClients; i++)
+		if (IsClientInGame(i))
 		{
-			if (IsClientConnected(i))
-				if (IsClientInGame(i))
-					if ((i == client) || (GetUserAdmin(i) != INVALID_ADMIN_ID))
-						AFK_PrintToChat(i, szBuffer);
+			if (g_bForceLanguage)
+				SetGlobalTransTarget(LANG_SERVER);
+			else
+				SetGlobalTransTarget(i);
+			VFormat(sBuffer, sizeof(sBuffer), sMessage, 3);
+#if defined _colors_included
+			if (g_bPrefixColors)
+				CPrintToChat(i, "{olive}[{green}%s{olive}] {default}%s", g_sPrefix, sBuffer);
+			else
+				PrintToChat(i, "[%s] %s", g_sPrefix, sBuffer);
+#else
+			PrintToChat(i, "[%s] %s", g_sPrefix, sBuffer);
+#endif
 		}
 	}
-}
-
-Kick_PrintToChat(const String:szMessage[], any:...)
-{
-	decl String:szBuffer[MAX_MESSAGE_LENGTH];
-	VFormat(szBuffer, sizeof(szBuffer), szMessage, 2);
-
-	new Announce = GetConVarInt(hCvarKickAnnounce);
-	if (Announce == 0)
-		return;
-	else if (Announce == 1)
-		AFK_PrintToChatAll(szBuffer);
-	else
-	{
-		for(new i = 1; i <= MaxClients; i++)
-		{
-			if (IsClientConnected(i))
-				if (IsClientInGame(i))
-					if (GetUserAdmin(i) != INVALID_ADMIN_ID)
-						AFK_PrintToChat(i, szBuffer);
-		}
-	}
-}
-
-AFK_PrintToChat(client, const String:szMessage[], any:...)
-{
-#if _DEBUG > 2
-	LogDebug(false, "AFK_PrintToChat - Printing message to chat");
-#endif
-	decl String:szBuffer[MAX_MESSAGE_LENGTH];
-	VFormat(szBuffer, sizeof(szBuffer), szMessage, 3);
-#if defined _colors_included
-	if (GetConVarBool(hCvarPrefixShort))
-	{
-		if (GetConVarBool(hCvarPrefixColor))
-			CPrintToChat(client, "{olive}[{green}AFK{olive}] {default}%s", szBuffer);
-		else
-			PrintToChat(client, "[AFK] %s", szBuffer);
-	}
-	else
-	{
-		if (GetConVarBool(hCvarPrefixColor))
-			CPrintToChat(client, "{olive}[{green}AFK Manager{olive}] {default}%s", szBuffer);
-		else
-			PrintToChat(client, "[AFK Manager] %s", szBuffer);
-	}
-#else
-	if (GetConVarBool(hCvarPrefixShort))
-	{
-		PrintToChat(client, "[AFK] %s", szBuffer);
-	}
-	else
-	{
-		PrintToChat(client, "[AFK Manager] %s", szBuffer);
-	}
-#endif
-}
-
-AFK_PrintToChatAll(const String:szMessage[], any:...)
-{
-#if _DEBUG > 2
-	LogDebug(false, "AFK_PrintToChatAll - Printing message to chat");
-#endif
-	decl String:szBuffer[MAX_MESSAGE_LENGTH];
-	VFormat(szBuffer, sizeof(szBuffer), szMessage, 2);
-#if defined _colors_included
-	if (GetConVarBool(hCvarPrefixShort))
-	{
-		if (GetConVarBool(hCvarPrefixColor))
-			CPrintToChatAll("{olive}[{green}AFK{olive}] {default}%s", szBuffer);
-		else
-			PrintToChatAll("[AFK] %s", szBuffer);
-	}
-	else
-	{
-		if (GetConVarBool(hCvarPrefixColor))
-			CPrintToChatAll("{olive}[{green}AFK Manager{olive}] {default}%s", szBuffer);
-		else
-			PrintToChatAll("[AFK Manager] %s", szBuffer);
-	}
-#else
-	if (GetConVarBool(hCvarPrefixShort))
-	{
-		PrintToChatAll("[AFK] %s", szBuffer);
-	}
-	else
-	{
-		PrintToChatAll("[AFK Manager] %s", szBuffer);
-	}
-#endif
 }
 
 // Debug Functions
-// Debug Log Function
 #if _DEBUG
-LogDebug(bool:Translation, String:text[], any:...)
+void LogDebug(bool Translation, char[] text, any:...) // Debug Log Function
 {
-	new String:message[255];
+	if (hCvarLogDebug != INVALID_HANDLE)
+		if (!GetConVarBool(hCvarLogDebug))
+			return;
+
+	char message[255];
 	if (Translation)
 		VFormat(message, sizeof(message), "%T", 2);
 	else
@@ -507,365 +555,656 @@ LogDebug(bool:Translation, String:text[], any:...)
 #elseif _DEBUG_MODE == 3
 	PrintToChatAll("[AFK Manager] %s", message);
 #elseif _DEBUG_MODE == 4
-	for (new i = 1; i <= GetMaxClients(); i++) {	
-		if(IsClientInGame(i) && IsClientConnected(i) && !IsFakeClient(i)) {
+	for (int i = 1; i <= MaxClients; i++)	
+		if(IsClientInGame(i) && IsClientConnected(i) && !IsClientSourceTV(i) && !IsFakeClient(i) )
 			PrintToConsole(i, "[AFK Manager] %s", message);
-		}
-	}
 #endif
 }
 #endif
 
-
-// Custom Functions
-// Check If A Client ID Is Valid
-stock bool:IsValidClient(client, bool:nobots = true)
+#if _DEBUG
+public Action Command_Test(int client, int args)
 {
-#if _DEBUG > 2
-		LogDebug(false, "IsValidClient - Client: %i No Bots: %b", client, nobots);
-#endif
-    if (client <= 0 || client > MaxClients)
-	{
-#if _DEBUG > 2
-		LogDebug(false, "IsValidClient - Client: %i is invalid", client);
-#endif
-        return false;
-	}
-	else if (!IsClientConnected(client))
-	{
-#if _DEBUG > 2
-		LogDebug(false, "IsValidClient - Client: %i is invalid? Connected: %b", client, IsClientConnected(client));
-#endif
-		return false;
-	}
-	else if (IsClientSourceTV(client))
-	{
-#if _DEBUG > 2
-		LogDebug(false, "IsValidClient - Client: %i is Source TV", client);
-#endif
-		return false;
-	}
-	else if (nobots && IsFakeClient(client))
-	{
-#if _DEBUG > 2
-		LogDebug(false, "IsValidClient - Client: %i is invalid? No Bots: %b FakeClient: %b", client, nobots, IsFakeClient(client));
-#endif
-		return false;
-	}
-#if _DEBUG > 2
-		LogDebug(false, "IsValidClient - Client: %i should be valid", client);
-#endif
-    return IsClientInGame(client); 
+	PrintToServer("RAWR");
+	PrintToConsole(client, "Team Num: %i", GetEntProp(client, Prop_Send, "m_iTeamNum"));
+	PrintToConsole(client, "Pending Team Num: %i", GetEntProp(client, Prop_Send, "m_iPendingTeamNum"));
+	//PrintToConsole(client, "Force Team: %f", GetEntPropFloat(client, Prop_Send, "m_fForceTeam"));
+	//PrintToConsole(client, "Initial Team Num: %i", GetEntProp(client, Prop_Data, "m_iInitialTeamNum"));
+	//PrintToConsole(client, "Move Done Time: %f", GetEntPropFloat(client, Prop_Data, "m_flMoveDoneTime"));
+	//PrintToConsole(client, "Class: %i", GetEntProp(client, Prop_Send, "m_iClass"));
+	PrintToConsole(client, "Force Team: %f", GetEntPropFloat(client, Prop_Data, "m_fForceTeam"));
+	PrintToConsole(client, "Player State: %i", GetEntProp(client, Prop_Send, "m_iPlayerState"));
+	//PrintToConsole(client, "Original Team Number: %i", GetEntProp(client, Prop_Send, "m_iOriginalTeamNumber"));
+
+	PrintToConsole(client, "Asherkin Magic #1: %i", FindSendPropInfo("CCSPlayer", "m_unMusicID") - 45);
+	PrintToConsole(client, "Asherkin Magic #2: %i", FindSendPropInfo("CCSPlayer", "m_nHeavyAssaultSuitCooldownRemaining") + 48);
+	PrintToConsole(client, "Asherkin Magic #3: %i", FindSendPropInfo("CCSPlayer", "m_unMusicID") - 21);
+	PrintToConsole(client, "Asherkin Magic #1 2: %i", GetEntData(client, FindSendPropInfo("CCSPlayer", "m_unMusicID") - 45, 1));
+	PrintToConsole(client, "Asherkin Magic #2 2: %i", GetEntData(client, FindSendPropInfo("CCSPlayer", "m_nHeavyAssaultSuitCooldownRemaining") + 48, 1));
+	PrintToConsole(client, "Asherkin Magic #3 2: %i", GetEntData(client, FindSendPropInfo("CCSPlayer", "m_unMusicID") - 21, 1));
+	//SetEntData(client, FindSendPropInfo("CCSPlayer", "m_unMusicID") - 45, 0, 1, true);
+	int g_iTeamOffset = FindSendPropInfo("CCSPlayerResource", "m_iTeam");
+	static iTeam[MAXPLAYERS+1];
+	GetEntDataArray(FindEntityByClassname(MaxClients+1, "cs_player_manager"), g_iTeamOffset, iTeam, MAXPLAYERS+1);
+	PrintToConsole(client, "Team: %i", iTeam[client]);
+	//int g_iAliveOffset = FindSendPropOffs("CCSPlayerResource", "m_bAlive");
+	//static iAlive[MAXPLAYERS+1];
+	//GetEntDataArray(FindEntityByClassname(MaxClients+1, "cs_player_manager"), g_iAliveOffset, iAlive, MAXPLAYERS+1);
+	//PrintToConsole(client, "Alive: %i", iAlive[client]);
+	//SetEntProp(client, Prop_Send, "m_iPendingTeamNum", 0);
+	//PrintToConsole(client, "Team Number: %i", GetEntData(client, Prop_Data, "m_nTeamNum"));
+	//PrintToConsole(client, "Blocked Team Number: %i", GetEntData(client, Prop_Data, "m_blockedTeamNumber"));
+
+	return Plugin_Handled;
 }
 
+public Action Command_Test2(int client, int args)
+{
+	PrintToServer("RAWR2");
+	//SetEntData(client, FindSendPropInfo("CCSPlayer", "m_nHeavyAssaultSuitCooldownRemaining") + 48, 0, 1, true); // Fix by Asherkin
+	SetEntData(client, FindSendPropInfo("CCSPlayer", "m_unMusicID") - 21, 0, 1, true);
+	PrintToConsole(client, "Asherkin: %i", GetEntData(client, FindSendPropInfo("CCSPlayer", "m_unMusicID") - 21, 1));
+	return Plugin_Handled;
+}
+
+#endif
+
+// Native Functions
 /*
-GetAliveClients(team = 0)
+int GetMaxPlugins()
 {
-	new clients = 0;
-	for (new i = 1; i <= GetMaxClients(); i++) {
-		if(IsClientConnected(i) && IsPlayerAlive(i)) {
-			if (team == 0)
-				clients++;
-			else if (GetClientTeam(i) == team)
-					clients++;
-		}
-	}
-	return clients;
+	return GetArraySize(g_FWD_hPlugins);
+}
+
+void AddPlugin(Handle plugin)
+{
+	int maxPlugins = GetMaxPlugins();
+	for (int i = 0; i < maxPlugins; i++)
+		if (plugin == GetArrayCell(g_FWD_hPlugins, i)) // Plugin Already Exists?
+			return;
+
+	PushArrayCell(g_FWD_hPlugins, plugin);
+}
+
+
+void RemovePlugin(Handle plugin)
+{
+	int maxPlugins = GetMaxPlugins();
+	for (int i = 0; i < maxPlugins; i++)
+		if (plugin == GetArrayCell(g_FWD_hPlugins, i))
+			RemoveFromArray(g_FWD_hPlugins, i);
 }
 */
 
-AFK_GetClientCount(bool:ExcludeBots, bool:inGameOnly = true)
+
+// General Functions
+char ActionToString(Action action)
+{
+	char Action_Name[32];
+	switch (action)
+	{
+		case Plugin_Continue:
+			Action_Name = "Plugin_Continue";
+		case Plugin_Changed:
+			Action_Name = "Plugin_Changed";
+		case Plugin_Handled:
+			Action_Name = "Plugin_Handled";
+		case Plugin_Stop:
+			Action_Name = "Plugin_Stop";
+		default:
+			Action_Name = "Plugin_Error";
+	}
+	return Action_Name;
+}
+
+bool IsValidClient(int client, bool nobots = true) // Check If A Client ID Is Valid
+{
+    if (client < 1 || client > MaxClients)
+		return false;
+	else if (!IsClientConnected(client))
+        return false;
+	else if (IsClientSourceTV(client))
+		return false;
+	else if (nobots && IsFakeClient(client))
+		return false;
+    return IsClientInGame(client);
+}
+
+void ResetAFKTimer(int index, bool Full = true)
+{
+#if _DEBUG
+	LogDebug(false, "ResetAFKTimer - Client: %i Full: %i", index, Full);
+#endif
+
+	if (g_hAFKTimer[index] != INVALID_HANDLE) // Check for timers and destroy them?
+	{
+		CloseHandle(g_hAFKTimer[index]);
+		g_hAFKTimer[index] = INVALID_HANDLE;
+	}
+	if (Full)
+		ResetPlayer(index);
+}
+
+void ResetAttacker(int index)
 {
 #if _DEBUG > 1
-		LogDebug(false, "AFK_GetClientCount - ExcludeBots: %i InGameOnly: %i", ExcludeBots, inGameOnly);
+	LogDebug(false, "ResetAttacker - Client: %i", index);
 #endif
-	new clients = 0;
-	if (!ExcludeBots) {
-		clients = GetClientCount(inGameOnly);
+	iPlayerAttacker[index] = -1;
+}
+
+void ResetSpawn(int index)
+{
+#if _DEBUG > 1
+	LogDebug(false, "ResetSpawn - Client: %i", index);
+#endif
+	g_iSpawnTime[index] =	-1;
+}
+
+void ResetObserver(int index)
+{
+#if _DEBUG > 1
+	LogDebug(false, "ResetObserver - Client: %i", index);
+#endif
+	iObserverMode[index] = -1;
+	iObserverTarget[index] = -1;
+}
+
+void ResetPlayer(int index, bool FullReset = true) // Player Resetting
+{
+	ResetSpawn(index);
+	bPlayerAFK[index] = true;
+
+	iButtonsArrayIndex[index] = 0;
+
+	if (FullReset)
+	{
+		g_iPlayerUserID[index] = -1;
+		g_iAFKTime[index] = -1;
+		g_iPlayerTeam[index] = -1;
+		ResetAttacker(index);
+		ResetObserver(index);
+
+		for (int i = 0; i < BUTTONS_MAX_ARRAY; i++)
+			iButtonsArray[index][i] = 0;
 	}
-	else {
-		for (new i = 1; i <= GetMaxClients(); i++) {
-			if( ( ( inGameOnly ) ? IsClientInGame( i ) : IsClientConnected( i ) ) && !IsFakeClient( i ) ) {
-				clients++;
+	else
+	{
+		g_iAFKTime[index] = GetTime();
+
+		for (int i = 0; i < g_iButtonsArraySize; i++)
+			iButtonsArray[index][i] = 0;
+	}
+#if _DEBUG > 1
+	LogDebug(false, "ResetPlayer - Client: %i Full Reset: %b AFK Time: %i", index, FullReset, g_iAFKTime[index]);
+#endif
+}
+
+void SetClientAFK(int client, bool Reset = true)
+{
+	if (Reset)
+		ResetPlayer(client, false);
+	else
+		bPlayerAFK[client] = true;
+
+	Forward_OnClientAFK(client);
+}
+
+void InitializeAFK(int index) // initialize AFK Features
+{
+	if (g_hAFKTimer[index] == INVALID_HANDLE)
+	{
+		g_iAFKTime[index] = GetTime();
+#if _DEBUG
+		LogDebug(false, "InitializeAFK - AFK Time: %i", g_iAFKTime[index]);
+#endif
+		g_iPlayerTeam[index] = GetClientTeam(index);
+		g_hAFKTimer[index] = CreateTimer(AFK_CHECK_INTERVAL, Timer_CheckPlayer, index, TIMER_REPEAT); // Create AFK Timer
+	}
+}
+
+void InitializePlayer(int index) // Player Initialization
+{
+#if _DEBUG
+	LogDebug(false, "InitializePlayer - Client: %i", index);
+#endif
+	if (IsValidClient(index))
+	{
+		int iClientUserID = GetClientUserId(index);
+
+		if (iClientUserID != g_iPlayerUserID[index]) // If UserID is the same keep AFK settings over map changes
+		{
+			ResetAFKTimer(index);
+			g_iPlayerUserID[index] = iClientUserID;
+		}
+		
+
+		Action ForwardResult = Forward_OnInitializePlayer(index);
+
+		if (ForwardResult != Plugin_Continue)
+		{
+			if (g_bLogWarnings)
+			{
+				char Action_Name[32];
+				Action_Name = ActionToString(ForwardResult);
+				LogToFile(AFKM_LogFile, "AFK Manager Event: InitializePlayer has been requested to: %s by an external plugin this action will affect the event outcome.", Action_Name);
 			}
 		}
+		else
+		{
+#if _DEBUG
+			LogDebug(false, "InitializePlayer - Client: %i is valid Admins Immune: %i", index, g_iAdminsImmunue);
+#endif
+			if ( (g_iAdminsImmunue > 0) && (g_iPlayerImmunity[index] == AFKImmunity_None) ) // Check Admin immunity if no immunity exists
+				if (CheckAdminImmunity(index))
+				{
+#if _DEBUG
+					LogDebug(false, "InitializePlayer - Client: %i is being set to Immunity: %i", index, g_iAdminsImmunue);
+#endif
+					SetPlayerImmunity(index, g_iAdminsImmunue);
+				}
+
+#if _DEBUG
+					LogDebug(false, "InitializePlayer - Client: %i Immunity: %i", index, g_iPlayerImmunity[index]);
+#endif
+			if (g_iPlayerImmunity[index] != AFKImmunity_Full)
+				InitializeAFK(index);
+		}
 	}
+}
+
+void UnInitializePlayer(int index) // Player UnInitialization
+{
+#if _DEBUG
+	LogDebug(false, "UnInitializePlayer - Client: %i", index);
+#endif
+	ResetAFKTimer(index);
+	g_iPlayerImmunity[index] = AFKImmunity_None;
+}
+
+int AFK_GetClientCount(bool inGameOnly = true)
+{
+#if _DEBUG > 1
+		LogDebug(false, "AFK_GetClientCount - InGameOnly: %b", inGameOnly);
+#endif
+
+	int clients = 0;
+	for (int i = 1; i <= MaxClients; i++)	
+		if( ( ( inGameOnly ) ? IsClientInGame(i) : IsClientConnected(i) ) && !IsClientSourceTV(i) && !IsFakeClient(i) )
+			clients++;
 	return clients;
 }
 
-CheckMinPlayers(players)
+void CheckMinPlayers()
 {
-	new MoveMinPlayers = GetConVarInt(hCvarMinPlayersMove);
-	new KickMinPlayers = GetConVarInt(hCvarMinPlayersKick);
+	int MoveMinPlayers = GetConVarInt(hCvarMinPlayersMove);
+	int KickMinPlayers = GetConVarInt(hCvarMinPlayersKick);
+
+	int players = AFK_GetClientCount();
 
 	if (players >= MoveMinPlayers)
 	{
 		if (!bMovePlayers)
-		{
-#if _DEBUG > 1
-			LogDebug(false, "CheckMinPlayers - Player count for AFK Move minimum has been reached, feature is now enabled: sm_afk_move_min_players = %i Current Players = %i", MoveMinPlayers, players);
-#endif
-			if (bLogWarnings)
+			if (g_bLogWarnings)
 				LogToFile(AFKM_LogFile, "Player count for AFK Move minimum has been reached, feature is now enabled: sm_afk_move_min_players = %i Current Players = %i", MoveMinPlayers, players);
-		}
 		bMovePlayers = true;
 	}
 	else
 	{
 		if (bMovePlayers)
-		{
-#if _DEBUG > 1
-			LogDebug(false, "CheckMinPlayers - Player count for AFK Move minimum is below requirements, feature is now disabled: sm_afk_move_min_players = %i Current Players = %i", MoveMinPlayers, players);
-#endif
-			if (bLogWarnings)
+			if (g_bLogWarnings)
 				LogToFile(AFKM_LogFile, "Player count for AFK Move minimum is below requirements, feature is now disabled: sm_afk_move_min_players = %i Current Players = %i", MoveMinPlayers, players);
-		}
 		bMovePlayers = false;
 	}
 
 	if (players >= KickMinPlayers)
 	{
 		if (!bKickPlayers)
-		{
-#if _DEBUG > 1
-			LogDebug(false, "CheckMinPlayers - Player count for AFK Kick minimum has been reached, feature is now enabled: sm_afk_kick_min_players = %i Current Players = %i", KickMinPlayers, players);
-#endif
-			if (bLogWarnings)
+			if (g_bLogWarnings)
 				LogToFile(AFKM_LogFile, "Player count for AFK Kick minimum has been reached, feature is now enabled: sm_afk_kick_min_players = %i Current Players = %i", KickMinPlayers, players);
-		}
 		bKickPlayers = true;
 	}
 	else
 	{
 		if (bKickPlayers)
-		{
-#if _DEBUG > 1
-			LogDebug(false, "CheckMinPlayers - Player count for AFK Kick minimum is below requirements, feature is now disabled: sm_afk_kick_min_players = %i Current Players = %i", KickMinPlayers, players);
-#endif
-			if (bLogWarnings)
+			if (g_bLogWarnings)
 				LogToFile(AFKM_LogFile, "Player count for AFK Kick minimum is below requirements, feature is now disabled: sm_afk_kick_min_players = %i Current Players = %i", KickMinPlayers, players);
-		}
 		bKickPlayers = false;
 	}
-#if _DEBUG > 2
-	LogDebug(false, "CheckMinPlayers - Minimum player count for AFK Move is: %i AFK Kick is: %i Current Players: %i", MoveMinPlayers, KickMinPlayers, players);
-#endif
 }
 
-// Main SourceMod Functions
-public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max) {
-#if defined _colors_included
-    MarkNativeAsOptional("GetUserMessageType");
-#endif
-	MarkNativeAsOptional("GetEngineVersion");
-	return APLRes_Success;
-}
-
-
-public OnPluginStart()
+void ChangeButtonsArraySize(int size)
 {
-	BuildLogFilePath();
+	if (size > BUTTONS_MAX_ARRAY)
+		size = BUTTONS_MAX_ARRAY;
 
-#if _DEBUG
-	LogDebug(false, "AFK Plugin Started!");
-#endif
+	g_iButtonsArraySize = size;
 
-	LoadTranslations("common.phrases");
-	LoadTranslations("afk_manager.phrases");
-
-	// Engine Detection
-#if defined NEW_ENGINE_DETECTION
-	if ( CanTestFeatures() && (GetFeatureStatus(FeatureType_Native, "GetEngineVersion") == FeatureStatus_Available) )
+	for (int i = 1; i <= MaxClients; i++)
 	{
-		new EngineVersion:g_EngineVersion = Engine_Unknown;
+		if (iButtonsArrayIndex[i] >= g_iButtonsArraySize)
+			iButtonsArrayIndex[i] = 0;
 
-		g_EngineVersion = GetEngineVersion();
-
-		switch (g_EngineVersion)
+		for (int j = g_iButtonsArraySize; j < BUTTONS_MAX_ARRAY; j++)
 		{
-			case Engine_Unknown: // Could not determine the engine version
-				g_Spec_FL_Mode = 6;
-			case Engine_Original: // Original Source Engine (used by The Ship)
-				g_Spec_FL_Mode = 5;
-			case Engine_SourceSDK2006: // Episode 1 Source Engine (second major SDK)
-				g_Spec_FL_Mode = 5;
-			case Engine_SourceSDK2007: // Orange Box Source Engine (third major SDK)
-				g_Spec_FL_Mode = 6;
-			case Engine_Left4Dead: // Left 4 Dead
-				g_Spec_FL_Mode = 6;
-			case Engine_DarkMessiah: // Dark Messiah Multiplayer (based on original engine)
-				g_Spec_FL_Mode = 5;
-			case Engine_Left4Dead2: // eft 4 Dead 2
-				g_Spec_FL_Mode = 6;
-			case Engine_AlienSwarm: // Alien Swarm (and Alien Swarm SDK)
-				g_Spec_FL_Mode = 6;
-			case Engine_BloodyGoodTime: // Bloody Good Time
-				g_Spec_FL_Mode = 6;
-			case Engine_EYE: // E.Y.E Divine Cybermancy
-				g_Spec_FL_Mode = 6;
-			case Engine_Portal2: // Portal 2
-				g_Spec_FL_Mode = 6;
-			case Engine_CSGO: // Counter-Strike: Global Offensive
-				g_Spec_FL_Mode = 6;
-			case Engine_CSS: // Counter-Strike: Source
-				g_Spec_FL_Mode = 6;
-			case Engine_DOTA: // Dota 2
-				g_Spec_FL_Mode = 6;
-			case Engine_HL2DM: // Half-Life 2 Deathmatch
-				g_Spec_FL_Mode = 6;
-			case Engine_DODS: // Day of Defeat: Source
-				g_Spec_FL_Mode = 6;
-			case Engine_TF2: // Team Fortress
-				g_Spec_FL_Mode = 6;
-			case Engine_NuclearDawn: // Nuclear Dawn
-				g_Spec_FL_Mode = 6;
-			default:
-			{
-				g_Spec_FL_Mode = 6;
-			}
-		}
-	}
-#else
-	new SDKEngine =	SOURCE_SDK_UNKNOWN;
-
-	SDKEngine = GuessSDKVersion();
-
-	if (SDKEngine > SOURCE_SDK_EPISODE2VALVE)
-	{
-		// Left 4 Dead
-		g_Spec_FL_Mode = 6;
-	}
-	else if (SDKEngine > SOURCE_SDK_EPISODE1)
-	{
-		// OrangeBox
-		g_Spec_FL_Mode = 6;
-	}
-	else
-	{
-		// Source/Other
-		g_Spec_FL_Mode = 5;
-	}
-#endif
-
-	// Check Game Mod
-	new String:game_mod[32];
-	GetGameFolderName(game_mod, sizeof(game_mod));
-
-	if (strcmp(game_mod, "synergy", false) == 0)
-	{
-		LogAction(0, -1, "[AFK Manager] %T", "Synergy", LANG_SERVER);
-		Synergy = true;
-	}
-	else if (strcmp(game_mod, "tf", false) == 0)
-	{
-		LogAction(0, -1, "[AFK Manager] %T", "TF2", LANG_SERVER);
-		TF2 = true;
-
-		// Hook AFK Convar
-		hCvarAFK = FindConVar("mp_idledealmethod");
-		hCvarTF2Arena = FindConVar("tf_gamemode_arena");
-		hCvarTF2WFPTime = FindConVar("mp_waitingforplayers_time");
-	}
-	else if ( (strcmp(game_mod, "cstrike", false) == 0) || (strcmp(game_mod, "csgo", false) == 0) )
-	{
-		LogAction(0, -1, "[AFK Manager] %T", "CSTRIKE", LANG_SERVER);
-		CSTRIKE = true;
-
-		// Hook AFK Convar
-		hCvarAFK = FindConVar("mp_autokick");
-	}
-/*
-	else if (strcmp(game_mod, "left4dead", false) == 0)
-	{
-		LogAction(0, -1, "[AFK Manager] %T", "L4D", LANG_SERVER);
-		L4D = true;
-	}
-*/
-
-
-	// Register Cvars
-	RegisterCvars();
-	SetConVarInt(hCvarLogWarnings, 0);
-	SetConVarInt(hCvarEnabled, 0);
-
-	// Register Hooks
-	RegisterHooks();
-
-	AutoExecConfig(true, "afk_manager");
-
-	// Register Commands
-	RegisterCmds();
-
-	// Purge Old Log Files
-	if (hCvarLogDays != INVALID_HANDLE)
-	{
-		if (GetConVarInt(hCvarLogDays) > 0)
-		{
-			PurgeOldLogs();
+			iButtonsArray[i][j] = 0;
 		}
 	}
 }
-
-public OnAllPluginsLoaded() {
-#if defined _updater_included
-	if (LibraryExists("updater"))
-	{
-		Updater_AddPlugin(UPDATE_URL);
-	}
-#elseif defined _autoupdate_included
-	if (LibraryExists("pluginautoupdate"))
-	{
-		AutoUpdate_AddPlugin("afkmanager.dawgclan.net", "/update.xml", AFKM_VERSION);
-	}
-#endif
-}
-
-public OnLibraryAdded(const String:name[])
-{
-#if defined _updater_included
-	if (StrEqual(name, "updater"))
-	{
-		Updater_AddPlugin(UPDATE_URL);
-	}
-#endif
-}
-
-public OnPluginEnd() {
-#if defined _autoupdate_included
-	if (LibraryExists("pluginautoupdate"))
-	{
-		AutoUpdate_RemovePlugin();
-	}
-#endif
-}
-
 
 // Auto Update Functions
 #if defined _updater_included
-public Action:Updater_OnPluginChecking()
+public Action Updater_OnPluginChecking()
 {
 	if (!GetConVarBool(hCvarAutoUpdate))
-	{
 		return Plugin_Handled;
-	}
 	return Plugin_Continue;
 }
 
-public Updater_OnPluginUpdated()
+public int Updater_OnPluginUpdated()
 {
 	LogToFile(AFKM_LogFile, "AFK Manager has just been updated to a new version");
 	ReloadPlugin();
 }
 #endif
 
-
-// Cvar Registrations
-RegisterCvars()
+// Cvar Hooks
+public void CvarChange_Status(Handle cvar, const char[] oldvalue, const char[] newvalue) // Hook ConVar Status
 {
 #if _DEBUG
-	LogDebug(false, "Running RegisterCvars()");
+	char sCvarName[64];
+	GetConVarName(cvar, sCvarName, sizeof(sCvarName));
+	LogDebug(false, "CvarChange_Status - ConVar: %s Old Value: %s New Value: %s", sCvarName, oldvalue, newvalue);
 #endif
-	hCvarVersion = CreateConVar("sm_afkm_version", AFKM_VERSION, "Current version of the AFK Manager", FCVAR_PLUGIN|FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY|FCVAR_DONTRECORD);
+
+	if (!StrEqual(oldvalue, newvalue))
+	{
+		if ((cvar == hCvarMinPlayersMove) || (cvar == hCvarMinPlayersKick))
+		{
+			if (g_bEnabled)
+				CheckMinPlayers();
+		}
+		else if (cvar == hCvarAdminsImmune)
+		{
+			g_iAdminsImmunue = StringToInt(newvalue);			
+			ChangeImmunity(g_iAdminsImmunue);
+		}
+		else if (cvar == hCvarTimeToMove)
+			g_iTimeToMove = StringToInt(newvalue);
+		else if (cvar == hCvarTimeToKick)
+			g_iTimeToKick = StringToInt(newvalue);
+		else if (cvar == hCvarButtonsBuffer)
+			ChangeButtonsArraySize(StringToInt(newvalue));
+		else if (StringToInt(newvalue) == 1)
+		{
+			if (cvar == hCvarEnabled)
+				EnablePlugin();
+			else if (cvar == hCvarLanguage)
+				g_bForceLanguage = true;
+			else if (cvar == hCvarLogWarnings)
+				g_bLogWarnings = true;
+			else if (cvar == hCvarPrefixShort)
+				g_sPrefix = "AFK";
+			else if (cvar == hCvarExcludeDead)
+				g_bExcludeDead = true;
+			else if (cvar == hCvarTF2Arena)
+				g_bTF2Arena = true;
+#if defined _colors_included
+			else if (cvar == hCvarPrefixColor)
+				g_bPrefixColors = true;
+#endif
+		}
+		else if (StringToInt(newvalue) == 0)
+		{
+			if (cvar == hCvarEnabled)
+				DisablePlugin();
+			else if (cvar == hCvarLanguage)
+				g_bForceLanguage = false;
+			else if (cvar == hCvarLogWarnings)
+				g_bLogWarnings = false;
+			else if (cvar == hCvarPrefixShort)
+				g_sPrefix = "AFK Manager";
+			else if (cvar == hCvarExcludeDead)
+				g_bExcludeDead = false;
+			else if (cvar == hCvarTF2Arena)
+				g_bTF2Arena = false;
+#if defined _colors_included
+			else if (cvar == hCvarPrefixColor)
+				g_bPrefixColors = false;
+#endif
+		}
+	}
+}
+
+public void CvarChange_Locked(Handle cvar, const char[] oldvalue, const char[] newvalue) // Lock ConVar
+{
+#if _DEBUG
+	char sCvarName[64];
+	GetConVarName(cvar, sCvarName, sizeof(sCvarName));
+	LogDebug(false, "CvarChange_Locked - ConVar: %s Old Value: %s New Value: %s", sCvarName, oldvalue, newvalue);
+#endif
+	if ((cvar == hCvarVersion) && (strcmp(newvalue, AFKM_VERSION) != 0))
+		SetConVarString(cvar, AFKM_VERSION);
+	else if ((cvar == hCvarAFK) && (StringToInt(newvalue) != 0))
+		SetConVarInt(cvar, 0);
+}
+
+void HookEvents() // Event Hook Registrations
+{
+	HookEvent("player_disconnect", Event_PlayerDisconnectPost, EventHookMode_Post);
+#if _DEBUG
+	LogDebug(false, "HookEvents - Hooked Player Disconnect Event.");
+#endif
+	HookEvent("player_team", Event_PlayerTeam);
+#if _DEBUG
+	LogDebug(false, "HookEvents - Hooked Player Team Event.");
+#endif
+	HookEvent("player_spawn", Event_PlayerSpawn);
+#if _DEBUG
+	LogDebug(false, "HookEvents - Hooked Player Spawn Event.");
+#endif
+	HookEvent("player_death", Event_PlayerDeathPost, EventHookMode_Post);
+#if _DEBUG
+	LogDebug(false, "HookEvents - Hooked Player Death Event.");
+#endif
+	if (TF2)
+	{
+		HookEvent("teamplay_round_win", Event_TeamplayRoundWin);
+#if _DEBUG
+		LogDebug(false, "HookEvents - Hooked Teamplay Round Win Event.");
+#endif
+		HookEvent("arena_round_start", Event_ArenaRoundStart);
+#if _DEBUG
+		LogDebug(false, "HookEvents - Hooked Arena Round Start Event.");
+#endif
+	}
+	else if (CSTRIKE || CSGO)
+	{
+		HookEvent("round_start",Event_RoundStart);
+#if _DEBUG
+		LogDebug(false, "HookEvents - Hooked Round Start Event.");
+#endif
+		HookEvent("round_freeze_end",Event_RoundFreezeEnd);
+#if _DEBUG
+		LogDebug(false, "HookEvents - Hooked Round Freeze End Event.");
+#endif
+	}
+}
+
+void HookConVars() // ConVar Hook Registrations
+{
+#if _DEBUG
+	LogDebug(false, "HookConVars - Running");
+#endif
+	if (!bCvarIsHooked[CONVAR_VERSION])
+	{
+		HookConVarChange(hCvarVersion, CvarChange_Locked); // Hook Version Variable
+		bCvarIsHooked[CONVAR_VERSION] = true;
+#if _DEBUG
+		LogDebug(false, "HookConVars - Hooked Version variable.");
+#endif
+	}
+	if (!bCvarIsHooked[CONVAR_ENABLED])
+	{
+		HookConVarChange(hCvarEnabled, CvarChange_Status); // Hook Enabled Variable
+		bCvarIsHooked[CONVAR_ENABLED] = true;
+#if _DEBUG
+		LogDebug(false, "HookConVars - Hooked Enable variable.");
+#endif
+	}
+	if (hCvarAFK != INVALID_HANDLE)
+	{
+		if (!bCvarIsHooked[CONVAR_MOD_AFK])
+		{
+			HookConVarChange(hCvarAFK, CvarChange_Locked); // Hook AFK Variable
+			bCvarIsHooked[CONVAR_MOD_AFK] = true;
+			SetConVarInt(hCvarAFK, 0);
+#if _DEBUG
+			LogDebug(false, "HookConVars - Hooked Mod Based AFK variable.");
+#endif
+		}
+	}
+	if (!bCvarIsHooked[CONVAR_PREFIXSHORT])
+	{
+		HookConVarChange(hCvarPrefixShort, CvarChange_Status); // Hook Short Prefix Variable
+		bCvarIsHooked[CONVAR_PREFIXSHORT] = true;
+#if _DEBUG
+		LogDebug(false, "HookConVars - Hooked Short Prefix variable.");
+#endif
+
+		if (hCvarPrefixShort.BoolValue)
+			g_sPrefix = "AFK";
+	}
+#if defined _colors_included
+	if (!bCvarIsHooked[CONVAR_PREFIXCOLORS])
+	{
+		HookConVarChange(hCvarPrefixColor, CvarChange_Status); // Hook Color Prefix Variable
+		bCvarIsHooked[CONVAR_PREFIXCOLORS] = true;
+#if _DEBUG
+		LogDebug(false, "HookConVars - Hooked Color Prefix variable.");
+#endif
+
+		if (hCvarPrefixColor.BoolValue)
+			g_bPrefixColors = true;
+	}
+#endif
+	if (!bCvarIsHooked[CONVAR_LANGUAGE])
+	{
+		HookConVarChange(hCvarLanguage, CvarChange_Status); // Hook Language Variable
+		bCvarIsHooked[CONVAR_LANGUAGE] = true;
+#if _DEBUG
+		LogDebug(false, "HookConVars - Hooked Language variable.");
+#endif
+		if (hCvarLanguage.BoolValue)
+			g_bForceLanguage = true;
+	}
+	if (!bCvarIsHooked[CONVAR_LOG_WARNINGS])
+	{
+		HookConVarChange(hCvarLogWarnings, CvarChange_Status); // Hook Warnings Variable
+		bCvarIsHooked[CONVAR_LOG_WARNINGS] = true;
+#if _DEBUG
+		LogDebug(false, "HookConVars - Hooked Warnings variable.");
+#endif
+
+		if (GetConVarBool(hCvarLogWarnings))
+			g_bLogWarnings = true;
+	}
+	if (!bCvarIsHooked[CONVAR_MINPLAYERSMOVE])
+	{
+		HookConVarChange(hCvarMinPlayersMove, CvarChange_Status); // Hook Minim Players to Move Variable
+		bCvarIsHooked[CONVAR_MINPLAYERSMOVE] = true;
+#if _DEBUG
+		LogDebug(false, "HookConVars - Hooked Minimum Players to Move variable.");
+#endif
+		CheckMinPlayers();
+	}
+	if (!bCvarIsHooked[CONVAR_MINPLAYERSKICK])
+	{
+		HookConVarChange(hCvarMinPlayersKick, CvarChange_Status); // Hook Minim Players to Kick Variable
+		bCvarIsHooked[CONVAR_MINPLAYERSKICK] = true;
+#if _DEBUG
+		LogDebug(false, "HookConVars - Hooked Minimum Players to Kick variable.");
+#endif
+		CheckMinPlayers();
+	}
+	if (!bCvarIsHooked[CONVAR_ADMINS_IMMUNE])
+	{
+		HookConVarChange(hCvarAdminsImmune, CvarChange_Status); // Hook AdminsImmune Variable
+		bCvarIsHooked[CONVAR_ADMINS_IMMUNE] = true;
+#if _DEBUG
+		LogDebug(false, "HookConVars - Hooked AdminsImmune variable.");
+#endif
+		g_iAdminsImmunue = hCvarAdminsImmune.IntValue;
+		ChangeImmunity(g_iAdminsImmunue);
+	}
+	
+	if (!bCvarIsHooked[CONVAR_TIMETOMOVE])
+	{
+		HookConVarChange(hCvarTimeToMove, CvarChange_Status); // Hook TimeToMove Variable
+		bCvarIsHooked[CONVAR_TIMETOMOVE] = true;
+#if _DEBUG
+		LogDebug(false, "HookConVars - Hooked TimeToMove variable.");
+#endif
+		g_iTimeToMove = hCvarTimeToMove.IntValue;
+	}
+	if (!bCvarIsHooked[CONVAR_TIMETOKICK])
+	{
+		HookConVarChange(hCvarTimeToKick, CvarChange_Status); // Hook TimeToKick Variable
+		bCvarIsHooked[CONVAR_TIMETOKICK] = true;
+#if _DEBUG
+		LogDebug(false, "HookConVars - Hooked TimeToKick variable.");
+#endif
+		g_iTimeToKick = hCvarTimeToKick.IntValue;
+	}
+	if (!bCvarIsHooked[CONVAR_EXCLUDEDEAD])
+	{
+		HookConVarChange(hCvarExcludeDead, CvarChange_Status); // Hook Exclude Dead Variable
+		bCvarIsHooked[CONVAR_EXCLUDEDEAD] = true;
+#if _DEBUG
+		LogDebug(false, "HookConVars - Hooked Exclude Dead variable.");
+#endif
+
+		if (hCvarExcludeDead.BoolValue)
+			g_bExcludeDead = true;
+	}
+
+
+	if (TF2)
+	{
+		if (hCvarTF2Arena != INVALID_HANDLE)
+		{
+			if (!bCvarIsHooked[CONVAR_TF2_ARENAMODE])
+			{
+				HookConVarChange(hCvarTF2Arena, CvarChange_Status); // Hook TF2 Arena Variable
+				bCvarIsHooked[CONVAR_TF2_ARENAMODE] = true;
+#if _DEBUG
+				LogDebug(false, "HookConVars - Hooked TF2 Arena variable.");
+#endif
+
+				if (hCvarTF2Arena.BoolValue)
+					g_bTF2Arena = true;
+			}
+		}
+	}
+	if (!bCvarIsHooked[CONVAR_BUTTONSBUFFER])
+	{
+		HookConVarChange(hCvarButtonsBuffer, CvarChange_Status); // Hook Buttons Buffer Variable
+		bCvarIsHooked[CONVAR_BUTTONSBUFFER] = true;
+#if _DEBUG
+		LogDebug(false, "HookConVars - Hooked Buttons Buffer variable.");
+#endif
+		g_iButtonsArraySize = hCvarButtonsBuffer.IntValue;
+		ChangeButtonsArraySize(g_iButtonsArraySize);
+	}
+	
+}
+
+void RegisterCvars() // Cvar Registrations
+{
+#if _DEBUG
+	LogDebug(false, "RegisterCvars - Running");
+#endif
+	hCvarVersion = CreateConVar("sm_afkm_version", AFKM_VERSION, "Current version of the AFK Manager", FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY|FCVAR_DONTRECORD);
 	SetConVarString(hCvarVersion, AFKM_VERSION);
 	hCvarEnabled = CreateConVar("sm_afk_enable", "1", "Is the AFK Manager enabled or disabled? [0 = FALSE, 1 = TRUE, DEFAULT: 1]", FCVAR_NONE, true, 0.0, true, 1.0);
 	hCvarAutoUpdate = CreateConVar("sm_afk_autoupdate", "1", "Is the AFK Manager automatic plugin update enabled or disabled? (Requires SourceMod Autoupdate plugin) [0 = FALSE, 1 = TRUE]", FCVAR_NONE, true, 0.0, true, 1.0);
@@ -886,412 +1225,57 @@ RegisterCvars()
 	hCvarMoveAnnounce = CreateConVar("sm_afk_move_announce", "1", "Should the AFK Manager announce AFK moves to the server? [0 = DISABLED, 1 = EVERYONE, 2 = ADMINS ONLY, DEFAULT: 1]", FCVAR_NONE, true, 0.0, true, 2.0);
 	hCvarTimeToMove = CreateConVar("sm_afk_move_time", "60.0", "Time in seconds (total) client must be AFK before being moved to spectator. [0 = DISABLED, DEFAULT: 60.0 seconds]");
 	hCvarWarnTimeToMove = CreateConVar("sm_afk_move_warn_time", "30.0", "Time in seconds remaining, player should be warned before being moved for AFK. [DEFAULT: 30.0 seconds]");
-	hCvarSpecCheckTarget = CreateConVar("sm_afk_spec_check_target", "1", "Should the AFK Manager check spectator target changes? [0 = FALSE, 1 = TRUE, DEFAULT: 1]", FCVAR_NONE, true, 0.0, true, 1.0);
 	hCvarKickPlayers = CreateConVar("sm_afk_kick_players", "1", "Should the AFK Manager kick AFK clients? [0 = DISABLED, 1 = KICK ALL, 2 = ALL EXCEPT SPECTATORS, 3 = SPECTATORS ONLY]");
 	hCvarKickAnnounce = CreateConVar("sm_afk_kick_announce", "1", "Should the AFK Manager announce AFK kicks to the server? [0 = DISABLED, 1 = EVERYONE, 2 = ADMINS ONLY, DEFAULT: 1]", FCVAR_NONE, true, 0.0, true, 2.0);
 	hCvarTimeToKick = CreateConVar("sm_afk_kick_time", "120.0", "Time in seconds (total) client must be AFK before being kicked. [0 = DISABLED, DEFAULT: 120.0 seconds]");
 	hCvarWarnTimeToKick = CreateConVar("sm_afk_kick_warn_time", "30.0", "Time in seconds remaining, player should be warned before being kicked for AFK. [DEFAULT: 30.0 seconds]");
 	hCvarSpawnTime = CreateConVar("sm_afk_spawn_time", "20.0", "Time in seconds (total) that player should have moved from their spawn position. [0 = DISABLED, DEFAULT: 20.0 seconds]");
 	hCvarWarnSpawnTime = CreateConVar("sm_afk_spawn_warn_time", "15.0", "Time in seconds remaining, player should be warned for being AFK in spawn. [DEFAULT: 15.0 seconds]");
-	hCvarExcludeTeamChange = CreateConVar("sm_afk_exclude_teamchange", "0", "Should the AFK Manager exclude team changes from resetting AFK status. [0 = FALSE, 1 = TRUE, DEFAULT: 0]", FCVAR_NONE, true, 0.0, true, 1.0);
-	hCvarExcludeBots = CreateConVar("sm_afk_exclude_bots", "0", "Should the AFK Manager exclude counting bots in player counts? [0 = FALSE, 1 = TRUE, DEFAULT: 0]", FCVAR_NONE, true, 0.0, true, 1.0);
 	hCvarExcludeDead = CreateConVar("sm_afk_exclude_dead", "0", "Should the AFK Manager exclude checking dead players? [0 = FALSE, 1 = TRUE, DEFAULT: 0]", FCVAR_NONE, true, 0.0, true, 1.0);
-	hCvarLocationThreshold = CreateConVar("sm_afk_location_threshold", "30.0", "Threshold for amount of movement required to mark a player as AFK. [0 = DISABLED, DEFAULT: 30.0]");
 	hCvarWarnUnassigned = CreateConVar("sm_afk_move_warn_unassigned", "1", "Should the AFK Manager warn team 0 (Usually unassigned) players? (Disabling may not work for some games) [0 = FALSE, 1 = TRUE, DEFAULT: 1]", FCVAR_NONE, true, 0.0, true, 1.0);
+	hCvarButtonsBuffer = CreateConVar("sm_afk_buttons", "5", "How many button changes should the AFK Manager track before resetting AFK status? [0 = DISABLED, DEFAULT: 5]", FCVAR_NONE, true, 0.0, true, float(BUTTONS_MAX_ARRAY));
+#if _DEBUG
+	hCvarLogDebug = CreateConVar("sm_afk_log_debug", "1", "Should the AFK Manager log debug messages? [0 = FALSE, 1 = TRUE, DEFAULT: 1]", FCVAR_NONE, true, 0.0, true, 1.0);
+#endif
 }
 
-// Cvar Hook Registrations
-RegisterHooks()
+void RegisterCmds() // Command Hook & Registrations
 {
 #if _DEBUG
-	LogDebug(false, "Running RegisterHooks()");
+	LogDebug(false, "RegisterCmds - Running");
 #endif
-	if (!bCvarIsHooked[CONVAR_VERSION])
-	{
-		// Hook Enabled Variable
-		HookConVarChange(hCvarVersion, CvarChange_Version);
-		bCvarIsHooked[CONVAR_VERSION] = true;
-#if _DEBUG
-		LogDebug(false, "RegisterHooks - Hooked Version variable.");
-#endif
-	}
-
-	if (!bCvarIsHooked[CONVAR_ENABLED])
-	{
-		// Hook Enabled Variable
-		HookConVarChange(hCvarEnabled, CvarChange_Enabled);
-		bCvarIsHooked[CONVAR_ENABLED] = true;
-#if _DEBUG
-		LogDebug(false, "RegisterHooks - Hooked Enable variable.");
-#endif
-	}
-
-	if (!bCvarIsHooked[CONVAR_WARNINGS])
-	{
-		// Hook Enabled Variable
-		HookConVarChange(hCvarLogWarnings, CvarChange_Warnings);
-		bCvarIsHooked[CONVAR_WARNINGS] = true;
-#if _DEBUG
-		LogDebug(false, "RegisterHooks - Hooked Warnings variable.");
-#endif
-
-		if (GetConVarBool(hCvarLogWarnings))
-			bLogWarnings = true;
-	}
-
-	if (!bCvarIsHooked[CONVAR_EXCLUDEBOTS])
-	{
-		// Hook Enabled Variable
-		HookConVarChange(hCvarExcludeBots, CvarChange_ExcludeBots);
-		bCvarIsHooked[CONVAR_EXCLUDEBOTS] = true;
-#if _DEBUG
-		LogDebug(false, "RegisterHooks - Hooked Exclude Bots variable.");
-#endif
-
-		if (GetConVarBool(hCvarExcludeBots))
-			bExcludeBots = true;
-	}
-
-	if (hCvarAFK != INVALID_HANDLE)
-	{
-		if (!bCvarIsHooked[CONVAR_MOD_AFK])
-		{
-			HookConVarChange(hCvarAFK, CvarChange_AFK);
-			bCvarIsHooked[CONVAR_MOD_AFK] = true;
-#if _DEBUG
-			LogDebug(false, "RegisterHooks - Hooked Mod Based AFK variable.");
-#endif
-			SetConVarInt(hCvarAFK, 0);
-		}
-	}
-
-	if (TF2)
-	{
-		if (hCvarTF2Arena != INVALID_HANDLE)
-		{
-			if (!bCvarIsHooked[CONVAR_TF2_ARENAMODE])
-			{
-				HookConVarChange(hCvarTF2Arena, CvarChange_TF2_Arena);
-				bCvarIsHooked[CONVAR_TF2_ARENAMODE] = true;
-#if _DEBUG
-				LogDebug(false, "RegisterHooks - Hooked TF2 Arena variable.");
-#endif
-
-				if (GetConVarBool(hCvarTF2Arena))
-					bTF2Arena = true;
-			}
-		}
-	}
-}
-
-// Command Hook/Registrations
-RegisterCmds()
-{
-#if _DEBUG
-	LogDebug(false, "Running RegisterCmds()");
-#endif
-	// Say Hooks
-	AddCommandListener(Command_Say, "say");
-	AddCommandListener(Command_Say, "say_team");
-
 	RegAdminCmd("sm_afk_spec", Command_Spec, ADMFLAG_KICK, "sm_afk_spec <#userid|name>");
-
 #if _DEBUG
 	RegAdminCmd("sm_afk_test", Command_Test, ADMFLAG_ROOT);
+	RegAdminCmd("sm_afk_test2", Command_Test2, ADMFLAG_ROOT);
 #endif
 }
 
-
-// TF2 Arena Round Start Hook
-TF2_HookRoundStart(bool:Arena)
+void EnablePlugin() // Enable Plugin Function
 {
 #if _DEBUG
-	LogDebug(false, "TF2_HookRoundStart - Hooking Events");
+	LogDebug(false, "EnablePlugin - AFK Plugin Starting!");
 #endif
-	if (Arena)
-	{
-#if _DEBUG
-		LogDebug(false, "TF2_HookRoundStart - Hooking Arena Events");
-#endif
-		if (bEventIsHooked[EVENT_TEAMPLAY_ROUND_START])
-		{
-			UnhookEvent("teamplay_round_start", Event_RoundStart);
-			bEventIsHooked[EVENT_TEAMPLAY_ROUND_START] = false;
-#if _DEBUG
-			LogDebug(false, "TF2_HookRoundStart - Unhooked Teamplay Round Start Event.");
-#endif
-		}
-		if (!bEventIsHooked[EVENT_ARENA_ROUND_START])
-		{
-			HookEvent("arena_round_start", Event_RoundStart);
-			bEventIsHooked[EVENT_ARENA_ROUND_START] = true;
-#if _DEBUG
-			LogDebug(false, "TF2_HookRoundStart - Hooked Arena Round Start Event.");
-#endif
-		}
-	}
-	else
-	{
-#if _DEBUG
-		LogDebug(false, "TF2_HookRoundStart - Hooking Teamplay Events");
-#endif
-		if (bEventIsHooked[EVENT_ARENA_ROUND_START])
-		{
-			UnhookEvent("arena_round_start", Event_RoundStart);
-			bEventIsHooked[EVENT_ARENA_ROUND_START] = false;
-#if _DEBUG
-			LogDebug(false, "TF2_HookRoundStart - Unhooked Arena Round Start Event.");
-#endif
-		}
-		if (!bEventIsHooked[EVENT_TEAMPLAY_ROUND_START])
-		{
-			HookEvent("teamplay_round_start", Event_RoundStart);
-			bEventIsHooked[EVENT_TEAMPLAY_ROUND_START] = true;
-#if _DEBUG
-			LogDebug(false, "TF2_HookRoundStart - Hooked Teamplay Round Start Event.");
-#endif
-		}
-	}
+	g_bEnabled = true;
+
+	for(int i = 1; i <= MaxClients; i++) // Reset timers for all players
+		InitializePlayer(i);
+
+	CheckMinPlayers(); // Check we have enough minimum players
 }
 
-// Enable Plugin
-EnablePlugin()
-{
-	// Hook Standard Events
-	if (!bEventIsHooked[EVENT_PLAYER_TEAM])
-	{
-		HookEvent("player_team", Event_PlayerTeamPost, EventHookMode_Post);
-		bEventIsHooked[EVENT_PLAYER_TEAM] = true;
-#if _DEBUG
-		LogDebug(false, "EnablePlugin - Hooked Player Team Event.");
-#endif
-	}
-	if (!bEventIsHooked[EVENT_PLAYER_SPAWN])
-	{
-		HookEvent("player_spawn",Event_PlayerSpawnPost, EventHookMode_Post);
-		bEventIsHooked[EVENT_PLAYER_SPAWN] = true;
-#if _DEBUG
-		LogDebug(false, "EnablePlugin - Hooked Player Spawn Event.");
-#endif
-	}
-	if (!bEventIsHooked[EVENT_PLAYER_DEATH])
-	{
-		HookEvent("player_death",Event_PlayerDeathPost, EventHookMode_Post);
-		bEventIsHooked[EVENT_PLAYER_DEATH] = true;
-#if _DEBUG
-		LogDebug(false, "EnablePlugin - Hooked Player Death Event.");
-#endif
-	}
-
-	// Team Fortress 2
-	if (TF2)
-	{
-		TF2_HookRoundStart(bTF2Arena);
-		//HookEvent("teamplay_restart_round", Event_RestartRound, EventHookMode_PostNoCopy);
-		if (!bEventIsHooked[EVENT_ROUND_STALEMATE])
-		{
-			HookEvent("teamplay_round_stalemate", Event_StaleMate, EventHookMode_PostNoCopy);
-			bEventIsHooked[EVENT_ROUND_STALEMATE] = true;
-#if _DEBUG
-			LogDebug(false, "EnablePlugin - Hooked Round Stalemate Event.");
-#endif
-		}
-	}
-
-	AFK_Start();
-}
-
-DisablePlugin()
-{
-	if (bEventIsHooked[EVENT_PLAYER_TEAM])
-	{
-		UnhookEvent("player_team", Event_PlayerTeamPost, EventHookMode_Post);
-		bEventIsHooked[EVENT_PLAYER_TEAM] = false;
-#if _DEBUG
-		LogDebug(false, "DisablePlugin - Unhooked Player Team Event.");
-#endif
-	}
-	if (bEventIsHooked[EVENT_PLAYER_SPAWN])
-	{
-		UnhookEvent("player_spawn",Event_PlayerSpawnPost, EventHookMode_Post);
-		bEventIsHooked[EVENT_PLAYER_SPAWN] = false;
-#if _DEBUG
-		LogDebug(false, "DisablePlugin - Unhooked Player Spawn Event.");
-#endif
-	}
-	if (bEventIsHooked[EVENT_PLAYER_DEATH])
-	{
-		UnhookEvent("player_death",Event_PlayerDeathPost, EventHookMode_Post);
-		bEventIsHooked[EVENT_PLAYER_DEATH] = false;
-#if _DEBUG
-		LogDebug(false, "DisablePlugin - Unhooked Player Death Event.");
-#endif
-	}
-
-	// Team Fortress 2
-	if (TF2)
-	{
-		if (bEventIsHooked[EVENT_TEAMPLAY_ROUND_START])
-		{
-			UnhookEvent("teamplay_round_start", Event_RoundStart);
-			bEventIsHooked[EVENT_TEAMPLAY_ROUND_START] = false;
-#if _DEBUG
-			LogDebug(false, "TF2_SetArenaMode - Unhooked Teamplay Round Start Event.");
-#endif
-		}
-		if (bEventIsHooked[EVENT_ARENA_ROUND_START])
-		{
-			UnhookEvent("arena_round_start", Event_RoundStart);
-			bEventIsHooked[EVENT_ARENA_ROUND_START] = false;
-#if _DEBUG
-			LogDebug(false, "TF2_SetArenaMode - Unhooked Arena Round Start Event.");
-#endif
-		}
-		if (bEventIsHooked[EVENT_ROUND_STALEMATE])
-		{
-			UnhookEvent("teamplay_round_stalemate", Event_StaleMate, EventHookMode_PostNoCopy);
-			bEventIsHooked[EVENT_ROUND_STALEMATE] = false;
-#if _DEBUG
-			LogDebug(false, "DisablePlugin - Unhooked Round Stalemate Event.");
-#endif
-		}
-	}
-
-	AFK_Stop();
-}
-
-
-// Cvar Hook Functions
-// Hook Version
-public CvarChange_Version(Handle:cvar, const String:oldvalue[], const String:newvalue[])
-{
-	if ( !StrEqual( newvalue, AFKM_VERSION) )
-	{
-		SetConVarString(cvar, AFKM_VERSION);
-	}
-}
-
-// Hook Plugin Status
-public CvarChange_Enabled(Handle:cvar, const String:oldvalue[], const String:newvalue[])
+void DisablePlugin() // Disable Plugin Function
 {
 #if _DEBUG
-	LogDebug(false, "CvarChange_Enabled - Enable cvar has been changed. Old value: %s New value: %s", oldvalue[0], newvalue[0]);
+	LogDebug(false, "DisablePlugin - AFK Plugin Stopping!");
 #endif
+	g_bEnabled = false;
 
-	if (!StrEqual(oldvalue, newvalue))
-	{
-		if (StringToInt(newvalue) == 1)
-		{
-#if _DEBUG
-			LogDebug(false, "CvarChange_Enabled - Enabled (Hooking Events).");
-#endif
-			EnablePlugin();
-		}
-		else if (StringToInt(newvalue) == 0)
-		{
-#if _DEBUG
-			LogDebug(false, "CvarChange_Enabled - Disabled (Unhooking Events).");
-#endif
-			DisablePlugin();
-		}
-	}
+	for(int i = 1; i <= MaxClients; i++) // Stop timers for all players
+		UnInitializePlayer(i);
 }
 
-// Hook Warning Logging
-public CvarChange_Warnings(Handle:cvar, const String:oldvalue[], const String:newvalue[])
-{
-#if _DEBUG
-	LogDebug(false, "CvarChange_Warnings - Warnings cvar has been changed. Old value: %s New value: %s", oldvalue[0], newvalue[0]);
-#endif
-
-	if (!StrEqual(oldvalue, newvalue))
-	{
-		if (StringToInt(newvalue) == 1)
-		{
-#if _DEBUG
-			LogDebug(false, "CvarChange_Warnings - Warnings Enabled.");
-#endif
-			bLogWarnings = true;
-		}
-		else if (StringToInt(newvalue) == 0)
-		{
-#if _DEBUG
-			LogDebug(false, "CvarChange_Warnings - Warnings Disabled.");
-#endif
-			bLogWarnings = false;
-		}
-	}
-}
-
-// Hook Exclude Bots Variable
-public CvarChange_ExcludeBots(Handle:cvar, const String:oldvalue[], const String:newvalue[])
-{
-#if _DEBUG
-	LogDebug(false, "CvarChange_ExcludeBots - Exclude Bots cvar has been changed. Old value: %s New value: %s", oldvalue[0], newvalue[0]);
-#endif
-
-	if (!StrEqual(oldvalue, newvalue))
-	{
-		if (StringToInt(newvalue) == 1)
-		{
-#if _DEBUG
-			LogDebug(false, "CvarChange_ExcludeBots - Exclude Bots Enabled.");
-#endif
-			bExcludeBots = true;
-		}
-		else if (StringToInt(newvalue) == 0)
-		{
-#if _DEBUG
-			LogDebug(false, "CvarChange_ExcludeBots - Exclude Bots Disabled.");
-#endif
-			bExcludeBots = false;
-		}
-		iNumPlayers = AFK_GetClientCount( bExcludeBots, true );
-	}
-}
-
-// Disable Mod Based AFK System
-public CvarChange_AFK(Handle:cvar, const String:oldvalue[], const String:newvalue[])
-{
-#if _DEBUG
-	LogDebug(false, "CvarChange_AFK - AFK cvar has been changed. Old value: %s New value: %s", oldvalue[0], newvalue[0]);
-#endif
-
-	if (StringToInt(newvalue) > 0)
-	{
-#if _DEBUG
-			LogDebug(false, "CvarChange_AFK - Disabling Mod AFK handler.");
-#endif
-			SetConVarInt(cvar, 0);
-	}	
-}
-
-
-// Hook TF2 Arena Mode
-public CvarChange_TF2_Arena(Handle:cvar, const String:oldvalue[], const String:newvalue[])
-{
-#if _DEBUG
-	LogDebug(false, "CvarChange_TF2_Arena - TF2 Arena cvar has been changed. Old value: %s New value: %s", oldvalue[0], newvalue[0]);
-#endif
-
-	if (!StrEqual(oldvalue, newvalue))
-	{
-		if (StringToInt(newvalue))
-		{
-			bTF2Arena = true;
-			TF2_HookRoundStart(bTF2Arena);
-		}
-		else
-		{
-			bTF2Arena = false;
-			TF2_HookRoundStart(bTF2Arena);
-		}
-	}
-}
-
-
-// Admin Spectate Move Command
-public Action:Command_Spec(client, args)
+public Action Command_Spec(int client, int args) // Admin Spectate Move Command
 {
 	if (args < 1)
 	{
@@ -1299,11 +1283,12 @@ public Action:Command_Spec(client, args)
 		return Plugin_Handled;
 	}
 
-	decl String:arg[65];
+	char arg[65];
 	GetCmdArg(1, arg, sizeof(arg));
 
-	decl String:target_name[MAX_TARGET_LENGTH];
-	decl target_list[MAXPLAYERS], target_count, bool:tn_is_ml;
+	char target_name[MAX_TARGET_LENGTH];
+	int target_list[MAXPLAYERS], target_count;
+	bool tn_is_ml;
 
 	if ((target_count = ProcessTargetString(
 			arg,
@@ -1319,31 +1304,25 @@ public Action:Command_Spec(client, args)
 		return Plugin_Handled;
 	}
 
-	for (new i = 0; i < target_count; i++)
+	for (int i = 0; i < target_count; i++)
 	{
 #if _DEBUG
 		LogDebug(false, "Command_Spec - Moving client: %i to Spectator and killing timer.", target_list[i]);
 #endif
 		if (MoveAFKClient(target_list[i], false) == Plugin_Stop)
-		{
-			if (hAFKTimers[target_list[i]] != INVALID_HANDLE)
+			if (g_hAFKTimer[target_list[i]] != INVALID_HANDLE)
 			{
-				CloseHandle(hAFKTimers[target_list[i]]);
-				hAFKTimers[target_list[i]] = INVALID_HANDLE;
+				CloseHandle(g_hAFKTimer[target_list[i]]);
+				g_hAFKTimer[target_list[i]] = INVALID_HANDLE;
 			}
-		}
 	}
 
 	if (tn_is_ml)
 	{
 		if (GetConVarBool(hCvarPrefixShort))
-		{
 			ShowActivity2(client, "[AFK] ", "%t", "Spectate_Force", target_name);
-		}
 		else
-		{
 			ShowActivity2(client, "[AFK Manager] ", "%t", "Spectate_Force", target_name);
-		}
 		LogToFile(AFKM_LogFile, "%L: %T", client, "Spectate_Force", LANG_SERVER, target_name);
 	}
 	else
@@ -1354,175 +1333,161 @@ public Action:Command_Spec(client, args)
 			ShowActivity2(client, "[AFK Manager] ", "%t", "Spectate_Force", "_s", target_name);
 		LogToFile(AFKM_LogFile, "%L: %T", client, "Spectate_Force", LANG_SERVER, "_s", target_name);
 	}
-
 	return Plugin_Handled;
 }
+
+// SourceMod Events
+public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
+{
+	g_bLateLoad = late; // Detect Late Load
+	API_Init(); // Initialize API
+	RegPluginLibrary("afkmanager"); // Register Plugin
+#if defined _colors_included
+    MarkNativeAsOptional("GetUserMessageType");
+#endif
+	MarkNativeAsOptional("GetEngineVersion");
+	return APLRes_Success;
+}
+
+public void OnPluginStart() // AFK Manager Plugin has started
+{
+	BuildLogFilePath();
 
 #if _DEBUG
-public Action:Command_Test(client, args)
-{
-	PrintToChatAll("*************************");
-	PrintToServer("RAWR");
-
-	//PrintToChatAll("Client: %i - Player State: %i", client, GetEntProp(client, Prop_Send, "m_iPlayerState"));
-	//PrintToChatAll("Client: %i - Player Class: %i", client, GetEntProp(client, Prop_Send, "m_iClass"));
-	//PrintToChatAll("Client: %i - Player Model: %i", client, GetEntProp(client, Prop_Send, "m_nModelIndex"));
-
-	//PrintToChatAll("Client: %i - Player Carrying Object: %i", client, GetEntProp(client, Prop_Send, "m_bCarryingObject"));
-	//PrintToChatAll("Client: %i - Player Carried Object: %i", client, GetEntProp(client, Prop_Send, "m_hCarriedObject"));
-
-	PrintToChatAll("Client: %i - Desired Player Class: %i", client, GetEntProp(client, Prop_Send, "m_iDesiredPlayerClass"));
-	PrintToChatAll("Client: %i - Arena Spectator: %i", client, GetEntProp(client, Prop_Send, "m_bArenaSpectator"));
-	PrintToChatAll("Client: %i - Life State: %i", client, GetEntProp(client, Prop_Send, "m_lifeState"));
-
-	//PrintToChatAll("Current Players GetClientCount: %i", GetClientCount(true));
-
-	//PrintToChatAll("Current Players: %i", iNumPlayers);
-	//PrintToChatAll("Current Team 0 Players: %i", iTeamPlayers[0]);
-	//PrintToChatAll("Current Team 1 Players: %i", iTeamPlayers[1]);
-	//PrintToChatAll("Current Team 2 Players: %i", iTeamPlayers[2]);
-	//PrintToChatAll("Current Team 3 Players: %i", iTeamPlayers[3]);
-	//PrintToChatAll("Current Team: %i", iPlayerTeam[client]);
-
-	//PrintToChat(client, "*************************");
-	//PrintToChat(client, "Unrelated test");
-	//PrintToChat(client, "[AFK Manager] %t", "MoveKick_Announce", "Move_Announce", "Test", "Kick_Announce", "Test");
-	//PrintToChat(client, "*************************");
-
-	//PrintToChatAll("Client: %i - Team Number: %i", client, GetEntProp(client, Prop_Send, "m_iTeamNum"));
-	//PrintToChatAll("Client: %i - Team Number: %i", client, GetEntProp(client, Prop_Send, "m_nNextThinkTick", -1));
-	//PrintToChatAll("Client: %i - Team Number: %i", client, GetEntProp(client, Prop_Send, "m_nSimulationTick"));
-	
-
-/*
-
-	new String:classname[128];
-
-	for (new i = 1; i < GetMaxEntities(); i++)
-	{
-		if (IsValidEdict(i))
-		{
-			GetEdictClassname(i, classname, sizeof(classname));
-			LogAction(0, -1, "ENTITY CLASS: %s", classname);
-		}
-	}
-
-
-	new team = FindEntityByClassname(-1, "tf_team");
-
-	while (team != -1)
-	{
-
-		decl m_Offset;
-
-		m_Offset = GetEntProp(team, Prop_Send, "m_iTeamNum");
-		PrintToChat(client, "Player on Team: %i", m_Offset);
-
-		m_Offset = FindSendPropInfo("CTFTeam", "\"player_array\"");
-		PrintToChat(client, "Player Array Offset: %i", m_Offset);
-		new ArrayValue[64];
-
-		GetEntDataArray(team, m_Offset, ArrayValue, 64, 1);
-
-		for (new i=0; i <= 63; i++)
-		{
-			if (ArrayValue[i] != 0)
-				PrintToChat(client, "Player: %i ", ArrayValue[i]);
-		}
-
-		PrintToChatAll("FOUND TEAM ENT INDEX: %i", team);
-		team = FindEntityByClassname(team, "tf_team");
-	}
-
-
-	if (IsClientObserver(client))
-	{
-		PrintToChatAll("Client: %i - You are an observer", client);
-	}
-	else
-		PrintToChatAll("Client: %i - You are NOT an observer", client);
-
-	new entityObjectiveResource = FindEntityByClassname(-1, "tf_objective_resource");
-	PrintToChatAll("OBJECTIVE RESOURCE ENT INDEX: %i",entityObjectiveResource);
-
-	new entityObserverPoint = FindEntityByClassname(-1, "info_observer_point");
-	PrintToChatAll("OBSERVER POINT ENT INDEX: %i",entityObserverPoint);
-
-	PrintToChatAll("PLAYER MANAGER ENT INDEX: %i",entityPlayerManager);
-
-	new offsPlayerClass = FindSendPropInfo("CTFPlayerResource", "m_iPlayerClass");
-	Value = GetEntData(entityPlayerManager, offsPlayerClass + (client * 4));
-	PrintToChatAll("Client: %i - Player Class Resource: %i", client, Value);
-
-	new offsAlive = FindSendPropInfo("CTFPlayerResource", "m_bAlive");
-	Value = GetEntData(entityPlayerManager, offsAlive + (client * 4));
-	PrintToChatAll("Client: %i - Player Alive Resource: %i", client, Value);
-
-	new offsHealth = FindSendPropInfo("CTFPlayerResource", "m_iHealth");
-	Value = GetEntData(entityPlayerManager, offsHealth + (client * 4));
-	PrintToChatAll("Client: %i - Player Health Resource: %i", client, Value);
-
-	Value = GetEntData(entityPlayerManager, offsArenaSpectators + client);
-	PrintToChatAll("Client: %i - Arena Spectator Resource: %i", client, Value);
-
-	Value = GetEntData(entityPlayerManager, offsTF2Team + (client * 4));
-	PrintToChatAll("Client: %i - TF2 Team Resource: %i", client, Value);
-
-	Value = GetEntProp(client, Prop_Send, "m_iObserverMode");
-	PrintToChatAll("Client: %i - Spectator Mode: %i", client, Value);
-
-	Value = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
-	PrintToChatAll("Client: %i - Spectator Target: %i", client, Value);
-
-	Value = GetEntProp(client, Prop_Send, "m_nPlayerState");
-	PrintToChatAll("Client: %i - Player State: %i", client, Value);
-
-	Value = GetEntProp(client, Prop_Send, "m_nPlayerCond");
-	PrintToChatAll("Client: %i - Player Condition: %i", client, Value);
-
-	Value = GetEntProp(client, Prop_Send, "m_nArenaNumChanges");
-	PrintToChatAll("Client: %i - Arena Num Changes?: %i", client, Value);
-
-	Value = GetEntProp(client, Prop_Send, "m_iSpawnCounter");
-	PrintToChatAll("Client: %i - Spawn Counter?: %i", client, Value);
-
-	new offsObserver = FindDataMapOffs(client,"m_bForcedObserverMode");
-	Value = GetEntData(client, offsObserver);
-	PrintToChatAll("Client: %i - Forced Observer?: %i", client, Value);
-
-	new entityGameRules = FindEntityByClassname(-1, "tf_gamerules");
-
-	PrintToChatAll("GAME RULES ENT INDEX: %i",entityGameRules);
-
-	new offsReady = FindSendPropInfo("CTeamplayRoundBasedRulesProxy", "m_bTeamReady");
-	offsReady = FindSendPropInfo("CTFPlayerResource", "m_bArenaSpectator");
-	Value = GetEntData(entityGameRules, offsReady + client);
-	PrintToChatAll("Client: %i - Ready?: %i", client, Value);
-*/
-	PrintToChatAll("*************************");
-
-	return Plugin_Handled;
-}
+	LogDebug(false, "AFK Plugin Started!");
 #endif
 
+	LoadTranslations("common.phrases");
+	LoadTranslations("afk_manager.phrases");
 
+	// Initialize Arrays
+	//g_FWD_hPlugins = CreateArray();
 
+	// Game Engine Detection
+	if ( CanTestFeatures() && (GetFeatureStatus(FeatureType_Native, "GetEngineVersion") == FeatureStatus_Available) )
+	{
+		EngineVersion g_EngineVersion = Engine_Unknown;
 
-public OnMapStart()
+		g_EngineVersion = GetEngineVersion();
+
+		switch (g_EngineVersion)
+		{
+			case Engine_Original: // Original Source Engine (used by The Ship)
+				OBS_MODE_ROAMING = 5;
+			case Engine_SourceSDK2006: // Episode 1 Source Engine (second major SDK)
+				OBS_MODE_ROAMING = 5;
+			case Engine_DarkMessiah: // Dark Messiah Multiplayer (based on original engine)
+				OBS_MODE_ROAMING = 5;
+			case Engine_CSS: // Counter-Strike: Source
+				OBS_MODE_ROAMING = 7;
+			case Engine_HL2DM: // Half-Life 2 Deathmatch
+				OBS_MODE_ROAMING = 7;
+			case Engine_DODS: // Day of Defeat: Source
+				OBS_MODE_ROAMING = 7;
+			case Engine_TF2: // Team Fortress 2
+				OBS_MODE_ROAMING = 7;
+			case Engine_SDK2013: // Source SDK 2013
+				OBS_MODE_ROAMING = 7;
+			default:
+				OBS_MODE_ROAMING = 6;
+		}
+
+#if _DEBUG
+		LogDebug(false, "OnPluginStart - Engine Version: %i OBS_MODE_ROAMING: %i", g_EngineVersion, OBS_MODE_ROAMING);
+#endif
+
+	}
+
+	RequireFeature(FeatureType_Capability, FEATURECAP_PLAYERRUNCMD_11PARAMS, "This plugin requires a newer version of SourceMod.");
+
+	// Check Game Mod
+	char game_mod[32];
+	GetGameFolderName(game_mod, sizeof(game_mod));
+
+	if (strcmp(game_mod, "synergy", false) == 0)
+	{
+		LogAction(0, -1, "[AFK Manager] %T", "Synergy", LANG_SERVER);
+		Synergy = true;
+	}
+	else if (strcmp(game_mod, "tf", false) == 0)
+	{
+		LogAction(0, -1, "[AFK Manager] %T", "TF2", LANG_SERVER);
+		TF2 = true;
+
+		hCvarAFK = FindConVar("mp_idledealmethod"); // Hook AFK Convar
+		hCvarTF2Arena = FindConVar("tf_gamemode_arena");
+		//hCvarTF2WFPTime = FindConVar("mp_waitingforplayers_time");
+	}
+	else if (strcmp(game_mod, "csgo", false) == 0)
+	{
+		LogAction(0, -1, "[AFK Manager] %T", "CSGO", LANG_SERVER);
+		CSGO = true;
+		hCvarAFK = FindConVar("mp_autokick"); // Hook AFK Convar
+	}
+	else if (strcmp(game_mod, "cstrike", false) == 0)
+	{
+		LogAction(0, -1, "[AFK Manager] %T", "CSTRIKE", LANG_SERVER);
+		CSTRIKE = true;
+
+		hCvarAFK = FindConVar("mp_autokick"); // Hook AFK Convar
+	}
+	else if (strcmp(game_mod, "gesource", false) == 0)
+	{
+		LogAction(0, -1, "[AFK Manager] %T", "GESOURCE", LANG_SERVER);
+		GESOURCE = true;
+
+		//hCvarAFK = FindConVar("mp_autokick"); // Hook AFK Convar
+	}
+
+	RegisterCvars(); // Register Cvars
+	SetConVarInt(hCvarLogWarnings, 0);
+	SetConVarInt(hCvarEnabled, 0);
+
+	HookConVars(); // Hook ConVars
+	HookEvents(); // Hook Events
+
+	AutoExecConfig(true, "afk_manager");
+
+	RegisterCmds(); // Register Commands
+
+	if (hCvarLogDays != INVALID_HANDLE)
+		if (GetConVarInt(hCvarLogDays) > 0)
+			PurgeOldLogs(); // Purge Old Log Files
+
+	if (g_bLateLoad) // Account for Late Loading
+		g_bWaitRound = false;
+}
+
+public void OnAllPluginsLoaded() // All Plugins have been loaded
+{
+#if defined _updater_included
+	if (LibraryExists("updater"))
+		Updater_AddPlugin(UPDATE_URL);
+#endif
+}
+
+public void OnLibraryAdded(const char[] name)
+{
+#if defined _updater_included
+	if (StrEqual(name, "updater"))
+		Updater_AddPlugin(UPDATE_URL);
+#endif
+}
+
+public void OnMapStart()
 {
 #if _DEBUG
 	LogDebug(false, "OnMapStart - Event Fired");
 #endif
 	BuildLogFilePath();
 
+	if (hCvarLogDays != INVALID_HANDLE)
+		if (GetConVarInt(hCvarLogDays) > 0)
+			PurgeOldLogs(); // Purge Old Log Files
+
 	if (GetConVarBool(hCvarAutoUpdate))
 	{
-#if defined _autoupdate_included
-		if (LibraryExists("pluginautoupdate") && !GetConVarBool(FindConVar("sv_lan")))
-		{
-			ServerCommand("sm_autoupdate_download afk_manager");
-		}
-#elseif defined _updater_included
+#if defined _updater_included
 		if (LibraryExists("updater") && !GetConVarBool(FindConVar("sv_lan")))
 		{
 			Updater_ForceUpdate();
@@ -1530,1744 +1495,882 @@ public OnMapStart()
 #endif
 	}
 
-	// Execute Config
-	AutoExecConfig(true, "afk_manager");
+	AutoExecConfig(true, "afk_manager"); // Execute Config
 
-	// Check Game Mode
-	if (TF2)
+	if (g_iMapEndTime != -1)
 	{
-		if (TF2_GameMode:TF2_DetectGameMode() == TF2_GameMode_Arena)
+		int iMapChangeTime = GetTime() - g_iMapEndTime; // Seconds from MapEnd to MapStart
+		for (int i = 1; i <= MaxClients; i++)
+			if (g_iAFKTime[i] != -1)
+				g_iAFKTime[i] = g_iAFKTime[i] + iMapChangeTime;
+
+		g_iMapEndTime = -1;
+	}
+
+	if (TF2) // Check TF2 Game Mode
+	{
+		if (TF2_DetectGameMode() == TF2GameMode_Arena) // Arena Mode
 		{
 #if _DEBUG
 			LogDebug(false, "OnMapStart - Detected TF2 Arena Game Mode");
 #endif
-			bTF2Arena = true;
+			g_bTF2Arena = true;
 		}
-
-		if (bTF2Arena)
-		{
-			// Set No Waiting for players
-			g_TF2_WFP_StartTime = 0;
-			bWaitRound = false;
-
-			if (hCvarTF2WFPTime != INVALID_HANDLE)
-			{
-				if ((GetConVarFloat(hCvarTF2WFPTime) - 1.0) > 0.0)
-				{
-	#if _DEBUG
-					LogDebug(false, "OnMapStart - Waiting for players event started");
-	#endif
-					// Waiting for players
-					g_TF2_WFP_StartTime = GetTime();
-					bWaitRound = true;
-				}
-			}
-		}
-		else
-		{
-			// No Waiting for players
-			g_TF2_WFP_StartTime = 0;
-			bWaitRound = false;
-		}
+		if (!g_bTF2Arena)
+			g_bWaitRound = false; // Un-Pause Plugin on Map Start
 	}
 	else
+		g_bWaitRound = false; // Un-Pause Plugin on Map Start
+}
+
+public void OnMapEnd()
+{
+#if _DEBUG
+	LogDebug(false, "OnMapEnd - Event Fired");
+#endif
+	g_iMapEndTime = GetTime();
+	g_bWaitRound = true; // Pause Plugin During Map Transitions?
+}
+
+public void OnClientPostAdminCheck(int client) // Client has joined server
+{
+#if _DEBUG
+	LogDebug(false, "OnClientPostAdminCheck - Client: %L Put in server", client);
+#endif
+
+	if (g_bEnabled)
 	{
-		// No Waiting for players
-		g_TF2_WFP_StartTime = 0;
-		bWaitRound = false;
-	}
-}
-
-public OnMapEnd()
-{
-	// Pause Plugin During Map Transitions?
-	bWaitRound = true;
-}
-
-
-// Player Resetting/Initialization/Uninitialization Functions
-ResetAttacker(index)
-{
-#if _DEBUG > 2
-	LogDebug(false, "ResetAttacker - Client: %i Reseting attacker variable", index);
-#endif
-	iPlayerAttacker[index] = -1;
-}
-
-ResetObserver(index)
-{
-#if _DEBUG > 2
-	LogDebug(false, "ResetObserver - Client: %i Reseting observer information", index);
-#endif
-	iSpecMode[index] = 0;
-	iSpecTarget[index] = 0;
-}
-
-ResetSpawn(index)
-{
-#if _DEBUG > 2
-	LogDebug(false, "ResetSpawn - Client: %i Reseting spawn settings", index);
-#endif
-	if (hAFKSpawnTimers[index] != INVALID_HANDLE)
-	{
-		CloseHandle(hAFKSpawnTimers[index]);
-		hAFKSpawnTimers[index] = INVALID_HANDLE;
-	}
-	// Reset Spawn Values
-	iSpawnTime[index] = -1;
-}
-
-ResetPlayer(index)
-{
-	// Reset Player Values
-#if _DEBUG > 1
-	LogDebug(false, "ResetPlayer - Client: %i Reseting arrays", index);
-#endif
-
-	fAFKTime[index] = 0.0;
-
-	fEyePosition[index] = Float:{0.0,0.0,0.0};
-	fMapPosition[index] = Float:{0.0,0.0,0.0};
-
-	ResetObserver(index);
-}
-
-InitializePlayer(index)
-{
-	bJoinedTeam[index] = false;
-
-	if (IsValidClient(index, bExcludeBots))
-	{
-#if _DEBUG > 1
-		LogDebug(false, "InitializePlayer - Initializing client: %i", index);
-#endif
-
-		// Check Timers and Destroy Them?
-		if (hAFKTimers[index] != INVALID_HANDLE)
-		{
-#if _DEBUG > 1
-			LogDebug(false, "InitializePlayer - Closing Old AFK timer for client: %i", index);
-#endif
-
-			CloseHandle(hAFKTimers[index]);
-			hAFKTimers[index] = INVALID_HANDLE;
-		}
-
-		// Check Admin immunity
-		new bool:FullImmunity = false;
-
-		if (GetConVarInt(hCvarAdminsImmune) == 1)
-			if (CheckAdminImmunity(index))
-				FullImmunity = true;
-		if (!FullImmunity)
-		{
-			// Create AFK Timer
-#if _DEBUG > 1
-			LogDebug(false, "InitializePlayer - Creating AFK timer for client: %i", index);
-#endif
-			hAFKTimers[index] = CreateTimer(AFK_CHECK_INTERVAL, Timer_CheckPlayer, index, TIMER_REPEAT);
-
-			ResetPlayer(index);
-		}
-		else
-		{
-#if _DEBUG > 1
-			LogDebug(false, "InitializePlayer - Not creating AFK timer for client: %i due to admin immunity?", index);
-#endif
-		}
-	}
-}
-
-UnInitializePlayer(index)
-{
-	bJoinedTeam[index] = false;
-
-	// Check for timers and destroy them?
-	if (hAFKTimers[index] != INVALID_HANDLE)
-	{
-#if _DEBUG
-		LogDebug(false, "UnInitializePlayer - Closing AFK timer for client: %i", index);
-#endif
-
-		CloseHandle(hAFKTimers[index]);
-		hAFKTimers[index] = INVALID_HANDLE;
-	}
-	ResetPlayer(index);
-	ResetSpawn(index);
-}
-
-AFK_Start()
-{
-#if _DEBUG
-	LogDebug(false, "AFK_Start - AFK Plugin Starting!");
-#endif
-
-	// Reset Player Count
-	iNumPlayers = AFK_GetClientCount( bExcludeBots, true );
-
-	// Make sure timers are reset for all players.
-	for(new i = 1; i <= MaxClients; i++)
-	{
-		if (IsClientConnected(i))
-		{
-			if (IsClientInGame(i))
-			{
-#if _DEBUG
-				LogDebug(false, "AFK_Start - Client: %d is in the game.", i);
-#endif
-				if (iPlayerTeam[i] == -1)
-				{
-					iPlayerTeam[i] = GetClientTeam(i);
-					iTeamPlayers[iPlayerTeam[i]]++;
-				}
-
-				InitializePlayer(i);
-			}
-		}
-	}
-
-	// Check we have enough minimum players
-	CheckMinPlayers(iNumPlayers);
-
-#if _DEBUG
-	LogDebug(false, "AFK_Start - Finished Reseting Clients!");	
-#endif
-}
-
-AFK_Stop()
-{
-#if _DEBUG
-	LogDebug(false, "AFK_Stop - AFK Plugin Halting!");
-#endif
-
-	// Reset Player Count
-	iNumPlayers = 0;
-
-	// Make sure timers are stopped for all players.
-	for(new i = 1; i <= MaxClients; i++)
-	{
-		UnInitializePlayer(i);
-
-		if (IsClientConnected(i))
-		{
-			if (IsClientInGame(i))
-			{
-				if (iPlayerTeam[i] != -1)
-				{
-					iTeamPlayers[iPlayerTeam[i]]--;
-					iPlayerTeam[i] = -1;
-				}
-			}
-		}
-	}
-
-#if _DEBUG
-	LogDebug(false, "AFK_Stop - Finished Reseting Clients!");	
-#endif
-}
-
-
-public OnClientPutInServer(client)
-{
-#if _DEBUG
-	LogDebug(false, "OnClientPutInServer - Client put in server: %i", client);
-#endif
-	// Increment Player Count
-	if (GetConVarBool(hCvarEnabled))
-	{
-		iNumPlayers = AFK_GetClientCount( bExcludeBots, true );
-#if _DEBUG
-	LogDebug(false, "OnClientPutInServer - Players: %i", iNumPlayers);
-#endif
-		iPlayerTeam[client] = GetClientTeam(client);
-		iTeamPlayers[iPlayerTeam[client]]++;
-#if _DEBUG
-	LogDebug(false, "OnClientPutInServer - Team: %i", iPlayerTeam[client]);
-#endif
-		CheckMinPlayers(iNumPlayers);
-	}
-}
-
-public OnClientPostAdminCheck(client)
-{
-	if (GetConVarBool(hCvarEnabled))
-	{
-		// Initialize Player once they are put in the server and post-connection authorizations have been performed.
-		//FakeClientCommandEx(client,"jointeam %i", g_sTeam_Index);
 		InitializePlayer(client);
+
+		CheckMinPlayers(); // Increment Player Count
 	}
 }
 
-public OnClientDisconnect(client)
-{
-#if _DEBUG
-	LogDebug(false, "OnClientDisconnect - Client disconnected: %i", client);
-#endif
-	if (GetConVarBool(hCvarEnabled))
-	{
-		// UnInitializePlayer since they are leaving the server.
-		UnInitializePlayer(client);
-	}
-}
 
-public OnClientDisconnect_Post(client)
+public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3], float angles[3], int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2])
 {
-#if _DEBUG
-	LogDebug(false, "OnClientDisconnect_Post - Client disconnected: %i", client);
-#endif
-	if (GetConVarBool(hCvarEnabled))
+	if (g_bEnabled)
 	{
-		for (new i = 1; i <= GetMaxClients(); i++) // Update observer mode and targets for all who were targeting the disconnecting client
+		if (IsClientSourceTV(client) || IsFakeClient(client)) // Ignore Source TV & Bots
+			return Plugin_Continue;
+
+		if (cmdnum <= 0) // NULL Commands?
+			return Plugin_Handled;
+
+#if _DEBUG > 2
+		LogDebug(false, "OnPlayerRunCmd - Client: %i Eye Angles: %f %f %f", client, angles[0], angles[1], angles[2]);
+#endif
+
+#if _DEBUG > 2
+		LogDebug(false, "OnPlayerRunCmd - Client: %i Mouse: %i %i", client, mouse[0], mouse[1]);
+#endif	
+
+		if (g_hAFKTimer[client] != INVALID_HANDLE)
 		{
-			if (iSpecTarget[i] == client)
+			if ((mouse[0] != 0) || (mouse[1] != 0)) // Check if mouse has moved
 			{
-				iSpecMode[i] = GetEntProp(i, Prop_Send, "m_iObserverMode");
-#if _DEBUG > 2
-	LogDebug(false, "OnClientDisconnect_Post - Client: %i Updating Client: %i Spec Mode: %i", client, i, iSpecMode[i]);
-#endif
-
-				if (iSpecMode[i] != g_Spec_FL_Mode)
+				bPlayerAFK[client] = false;
+				return Plugin_Continue;
+			}
+			else
+			{
+				if (g_iButtonsArraySize > 0)
 				{
-					iSpecTarget[i] = GetEntPropEnt(i, Prop_Send, "m_hObserverTarget");
-#if _DEBUG > 2
-					LogDebug(false, "OnClientDisconnect_Post - Client: %i Updating Client: %i Spec Target: %i", client, i, iSpecTarget[i]);
+					int iLastButtons = 0;
+					if (g_iButtonsArraySize > 1)
+					{
+						if (iButtonsArrayIndex[client] == 0)
+							iLastButtons = iButtonsArray[client][g_iButtonsArraySize-1];
+						else
+							iLastButtons = iButtonsArray[client][iButtonsArrayIndex[client]-1];
+					}
+					else
+						iLastButtons = iButtonsArray[client][iButtonsArrayIndex[client]];
+
+					if (iLastButtons != buttons) // ( (angles[0] != fEyeAngles[client][0]) || (angles[1] != fEyeAngles[client][1]) || (angles[2] != fEyeAngles[client][2]) )
+					{
+						if (IsClientObserver(client))
+						{
+							if (iObserverMode[client] == -1) // Player has an Invalid Observer Mode
+							{
+								iButtonsArray[client][iButtonsArrayIndex[client]] = buttons;
+								//fEyeAngles[client] = angles;
+								return Plugin_Continue;
+							}
+							else if (iObserverMode[client] != 4) // Check Observer Mode in case it has changed
+								iObserverMode[client] = GetEntProp(client, Prop_Send, "m_iObserverMode");
+
+							if ((iObserverMode[client] == 4) && (iLastButtons == buttons))
+							{
+#if _DEBUG > 1
+								LogDebug(false, "OnPlayerRunCmd - Client: %i in chase cam and buttons have not changed.", client);
+#endif
+								return Plugin_Continue;
+							}
+
+							if (iLastButtons == buttons) // && ( (FloatAbs(FloatSub(angles[0],fEyeAngles[client][0])) < 2.0) && (FloatAbs(FloatSub(angles[1],fEyeAngles[client][1])) < 2.0) && (FloatAbs(FloatSub(angles[2],fEyeAngles[client][2])) < 2.0) )
+							{
+#if _DEBUG > 1
+//								LogDebug(false, "OnPlayerRunCmd - Client: %i Eye Angles within threshold: %f %f %f", client, FloatSub(angles[0],fEyeAngles[client][0]),FloatSub(angles[1],fEyeAngles[client][1]),FloatSub(angles[2],fEyeAngles[client][2]));
+#endif
+								//fEyeAngles[client] = angles;
+								return Plugin_Continue;
+							}
+						}
+
+						if (g_iButtonsArraySize > 1)
+						{
+							for (int i = 0; i < g_iButtonsArraySize; i++)
+							{
+								if (iButtonsArray[client][i] == buttons)
+								{
+#if _DEBUG
+									LogDebug(false, "OnPlayerRunCmd - Client: %i buttons found in buffer.", client);
+#endif
+									return Plugin_Continue;
+								}
+							}
+							iButtonsArray[client][iButtonsArrayIndex[client]] = buttons;
+
+							if (iButtonsArrayIndex[client]++ >= g_iButtonsArraySize) // Increment Array Index
+								iButtonsArrayIndex[client] = 0;
+
+						} else
+							iButtonsArray[client][iButtonsArrayIndex[client]] = buttons;
+
+#if _DEBUG
+						LogDebug(false, "OnPlayerRunCmd - Client: %i buttons not in buffer.", client);
 #endif
 
-					if (!IsValidClient(iSpecTarget[i]))
-						iSpecTarget[i] = -1;
+						if (bPlayerDeath[client])
+							bPlayerDeath[client] = false;
+						else
+							if (bPlayerAFK[client])
+							{
+								Forward_OnClientBack(client);
+								bPlayerAFK[client] = false;
+							}
+						//ResetPlayer(client, false);
+					}
 				}
 			}
 		}
-
-		// Reset Player Counts
-		iNumPlayers = AFK_GetClientCount( bExcludeBots, true );
-#if _DEBUG
-	LogDebug(false, "OnClientDisconnect_Post - Players: %i", iNumPlayers);
-#endif
-
-#if _DEBUG
-	LogDebug(false, "OnClientDisconnect_Post - Old Team: %i", iPlayerTeam[client]);
-#endif
-
-		if (iPlayerTeam[client] != -1)
-		{
-			iTeamPlayers[iPlayerTeam[client]]--;
-			iPlayerTeam[client] = -1;
-		}
-
-		CheckMinPlayers(iNumPlayers);
-	}
-}
-
-
-
-
-/*
-TF2_RegisterArenaHooks()
-{
-#if _DEBUG
-	LogDebug(false, "TF2_RegisterArenaHooks - Registering Arena Hooks");
-#endif
-	HookEvent("teamplay_broadcast_audio", Event_BroadcastAudio, EventHookMode_Post);
-	HookEvent("teamplay_waiting_begins", Event_WaitBegins, EventHookMode_PostNoCopy);
-	HookEvent("teamplay_waiting_ends", Event_WaitEnds, EventHookMode_PostNoCopy);
-	HookEvent("arena_round_start", Event_WaitEnds, EventHookMode_PostNoCopy);
-	HookEvent("arena_win_panel", Event_WaitBegins, EventHookMode_PostNoCopy);
-	HookEvent("teamplay_update_timer", Event_WaitEnds, EventHookMode_PostNoCopy);
-	//HookEvent("game_message", Event_WaitEnds, EventHookMode_PostNoCopy);
-	//arena_player_notification
-	//HookEvent("teamplay_round_win", Event_WaitBegins, EventHookMode_PostNoCopy);
-}
-
-TF2_UnregisterArenaHooks()
-{
-#if _DEBUG
-	LogDebug(false, "TF2_UnregisterArenaHooks - Unregistering Arena Hooks");
-#endif
-	UnhookEvent("teamplay_broadcast_audio", Event_BroadcastAudio, EventHookMode_Post);
-	UnhookEvent("teamplay_waiting_begins", Event_WaitBegins, EventHookMode_PostNoCopy);
-	UnhookEvent("teamplay_waiting_ends", Event_WaitEnds, EventHookMode_PostNoCopy);
-	UnhookEvent("arena_round_start", Event_WaitEnds, EventHookMode_PostNoCopy);
-	UnhookEvent("arena_win_panel", Event_WaitBegins, EventHookMode_PostNoCopy);
-	UnhookEvent("teamplay_update_timer", Event_WaitEnds, EventHookMode_PostNoCopy);
-	//HookEvent("game_message", Event_WaitEnds, EventHookMode_PostNoCopy);
-	//arena_player_notification
-	//HookEvent("teamplay_round_win", Event_WaitBegins, EventHookMode_PostNoCopy);
-}
-
-TF2_StartArenaMode()
-{
-#if _DEBUG
-	LogDebug(false, "TF2_StartArenaMode - TF2 Arena Mode Starting");
-#endif
-	g_TF2ArenaStarted = false;
-	bWaitRound = true;
-
-	TF2_RegisterArenaHooks();
-}
-
-TF2_EndArenaMode()
-{
-#if _DEBUG
-	LogDebug(false, "TF2_EndArenaMode - TF2 Arena Mode Ending");
-#endif
-	g_TF2ArenaStarted = false;
-	bWaitRound = false;
-
-	TF2_UnregisterArenaHooks();
-}
-
-public Action:Event_BroadcastAudio(Handle:event, const String:name[], bool:dontBroadcast)
-{
-	// TF2 Broadcast Sound
-	decl String:sound[64];
-	GetEventString(event, "sound", sound, sizeof(sound));
-
-	if (StrEqual(sound,"Announcer.AM_RoundStartRandom"))
-	{
-#if _DEBUG
-		LogDebug(false, "Event_BroadcastAudio - Round Started");
-#endif
-		g_TF2ArenaStarted = true;
-		bWaitRound = false;
 	}
 	return Plugin_Continue;
 }
 
-public Action:Event_WaitBegins(Handle:event, const String:name[], bool:dontBroadcast)
+public Action OnClientSayCommand(int client, const char[] command, const char[] sArgs) // Player Chat
 {
-	// TF2 Wait for players begins?
-#if _DEBUG
-	LogDebug(false, "Event_WaitBegins - %s - Waiting for players Started", name);
-#endif
-
-	g_TF2ArenaStarted = false;
-	bWaitRound = true;
+	if (g_bEnabled)
+		if (g_hAFKTimer[client] != INVALID_HANDLE)
+			ResetPlayer(client, false); // Reset timer once player has said something in chat.
 	return Plugin_Continue;
 }
 
-public Action:Event_WaitEnds(Handle:event, const String:name[], bool:dontBroadcast)
+#if defined _tf2_included
+public void TF2_OnWaitingForPlayersStart()
 {
-	// TF2 Wait for players ends?
 #if _DEBUG
-	LogDebug(false, "Event_WaitEnds - %s - Waiting for players Ended", name);
+	LogDebug(false, "TF2_OnWaitingForPlayersStart");
 #endif
-
-	g_TF2ArenaStarted = true;
-	bWaitRound = false;
-	return Plugin_Continue;
+	if (g_bEnabled)
+		if (TF2)
+			g_bWaitRound = true;
 }
-*/
+
+public void TF2_OnWaitingForPlayersEnd()
+{
+#if _DEBUG
+	LogDebug(false, "TF2_OnWaitingForPlayersEnd");
+#endif
+	if (g_bEnabled)
+		if (TF2)
+			g_bWaitRound = false;
+}
+#endif
 
 
 // Game Events
-public Action:Event_PlayerSpawnPost(Handle:event, const String:name[], bool:dontBroadcast)
+public Action Event_PlayerDisconnectPost(Handle event, const char[] name, bool dontBroadcast)
 {
-
-	new client = GetClientOfUserId(GetEventInt(event, "userid"));
-
-	// Check the client is not console/world?
-	if (client > 0)
+	if (g_bEnabled)
 	{
-		// Check client is not a bot or otherwise fake player.
-		if (IsValidClient(client, bExcludeBots))
-		{
-			// Lincoln is fucking up
-			// Fix for Valve deciding to fire player_spawn on Spectator team!?!?
-			// IsClientObserver() IsPlayerAlive() and GetClientHealth() do not fix this bug?
-			if (CSTRIKE)
-			{
-				if (GetClientTeam(client) == 0)
-				{
-					// Unassigned Team?
-					return Plugin_Continue;
-				}	
-			}
-
-			if (!IsClientObserver(client))
-			{
-#if _DEBUG > 2
-				LogDebug(false, "Event_PlayerSpawnPost - Client %i Spawned and is not an Observer", client);
-#endif
-				// Fix for Valve causing Unassigned to not be detected as an Observer in CSS?
-				if (IsPlayerAlive(client))
-				{
-#if _DEBUG > 2
-					LogDebug(false, "Event_PlayerSpawnPost - Client %i Spawned and is alive?", client);
-#endif
-					// Fix for Valve causing Unassigned to be alive?
-					if (GetClientHealth(client) > 0)
-					{
-#if _DEBUG > 2
-						LogDebug(false, "Event_PlayerSpawnPost - Client %i Spawned and has health? Health: %i", client, GetClientHealth(client));
-#endif
-
-						ResetObserver(client);
-						ResetAttacker(client);
-
-/*
-						// Setting new AFK details to ensure timer continues
-						// Get New Player Eye Angles
-						GetClientEyeAngles(client, fEyePosition[client]);
-#if _DEBUG > 2
-						LogDebug(false, "Event_PlayerSpawnPost - Client %i Eye Angles: %f %f %f", client, fEyePosition[client][0], fEyePosition[client][1], fEyePosition[client][2]);
-#endif
-
-						// Get New Player Map Origin
-						GetClientAbsOrigin(client, fMapPosition[client]);
-#if _DEBUG > 2
-						LogDebug(false, "Event_PlayerSpawnPost - Client %i Origin: %f %f %f", client, fMapPosition[client][0], fMapPosition[client][1], fMapPosition[client][2]);
-#endif
-
-						iSpecMode[client] = GetEntProp(client, Prop_Send, "m_iObserverMode");
-						iSpecTarget[client] = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
-*/
-
-						// Check if Spawn AFK is enabled.
-						if (GetConVarFloat(hCvarSpawnTime) > 0.0)
-						{
+		int iUserID = GetEventInt(event, "userid");
+		int iClient = GetClientOfUserId(iUserID);
 #if _DEBUG
-							LogDebug(false, "Event_PlayerSpawnPost - Client: %i Spawn AFK Time: %f", client, GetConVarFloat(hCvarSpawnTime));
+		LogDebug(false, "Event_PlayerDisconnectPost - Client: %i UserID: %i Disconnected", iClient, iUserID);
 #endif
-							ResetSpawn(client);
-							if ((GetConVarInt(hCvarAdminsImmune) != 1) || (!CheckAdminImmunity(client)))
-							{
-#if _DEBUG > 1
-								LogDebug(false, "Event_PlayerSpawnPost - Client: %i is not immune", client);
-#endif
-								iSpawnTime[client] = GetTime();
-								hAFKSpawnTimers[client] = CreateTimer(AFK_CHECK_INTERVAL, Timer_AFKSpawn, client, TIMER_REPEAT);
-							}
-						}
-// This will reset status of dead people which has adverse effects
-/*
-						else
-						{
-#if _DEBUG > 1
-							LogDebug(false, "Event_PlayerSpawnPost - Resetting AFK status because client has spawned: %i", client);
-#endif
-							// Reset AFK timer because they spawned.
-							ResetPlayer(client);
-						}
-*/
-#if _DEBUG > 2
-						LogDebug(false, "Event_PlayerSpawnPost - Client spawned: %i", client);
-#endif
-						CreateTimer(0.1, Timer_PlayerSpawn_Delay, GetClientSerial(client));
-					}
-				}
-			}
-		}
+		if ( (iClient > 0) && (iClient <= MaxClients) )
+			UnInitializePlayer(iClient); // UnInitializePlayer since they are leaving the server.
+		else // Player might have timed out which returns 0 for Client
+			for (int i = 1; i <= MaxClients; i++)
+				if (g_iPlayerUserID[i] == iUserID)
+					UnInitializePlayer(i);
+
+		CheckMinPlayers();
 	}
 	return Plugin_Continue;
 }
 
-public Action:Event_PlayerTeamPost(Handle:event, const String:name[], bool:dontBroadcast)
+public Action Event_PlayerTeam(Handle event, const char[] name, bool dontBroadcast)
 {
-	new client = GetClientOfUserId(GetEventInt(event, "userid"));
-
-#if _DEBUG
-	LogDebug(false, "Event_PlayerTeamPost - Client: %i", client);
-#endif
-
-	// Check the client is not console/world?
-	if (client > 0)
+	if (g_bEnabled)
 	{
-		if (IsClientInGame(client) && IsClientConnected(client))
-		{
-			new team = GetEventInt(event, "team");
+		int client = GetClientOfUserId(GetEventInt(event, "userid"));
 
-			if (TF2)
+		if (client > 0) // Check the client is not console/world?
+			if (IsValidClient(client))
 			{
-				if (!bTF2Arena)
+				if (g_hAFKTimer[client] != INVALID_HANDLE)
 				{
-					if ((team == TF2_TEAM_RED) || (team == TF2_TEAM_BLUE))
+					g_iPlayerTeam[client] = GetEventInt(event, "team");
+
+#if _DEBUG
+					LogDebug(false, "Event_PlayerTeam - Client: %i Joined Team: %i", client, g_iPlayerTeam[client]);
+#endif
+					if (g_iPlayerTeam[client] != g_iSpec_Team)
 					{
-#if _DEBUG
-						LogDebug(false, "Event_PlayerTeamPost - BEFORE - Red Team Players: %d Blue Team players: %d", iTeamPlayers[TF2_TEAM_RED], iTeamPlayers[TF2_TEAM_BLUE]);
-#endif
-						if ((iTeamPlayers[TF2_TEAM_RED] == 0) && (iTeamPlayers[TF2_TEAM_BLUE] == 0))
-						{
-#if _DEBUG
-							LogDebug(false, "Event_PlayerTeamPost - First player joined a team");
-#endif
-							// This is the first player joining a team? Waiting for players starts?
+						ResetObserver(client);
+						ResetPlayer(client, false);
+					}
+				}
+			}
+	}
+	return Plugin_Continue;
+}
 
-							// Set No Waiting for players
-							g_TF2_WFP_StartTime = 0;
-							bWaitRound = false;
+public Action Event_PlayerSpawn(Handle event, const char[] name, bool dontBroadcast)
+{
+	if (g_bEnabled)
+	{
+		int client = GetClientOfUserId(GetEventInt(event, "userid"));
 
-							if (hCvarTF2WFPTime != INVALID_HANDLE)
+#if _DEBUG
+		LogDebug(false, "Event_PlayerSpawn - Client: %i", client);
+#endif
+		if (client > 0) // Check the client is not console/world?
+			if (IsValidClient(client)) // Check client is not a bot or otherwise fake player.
+			{
+				if (g_hAFKTimer[client] != INVALID_HANDLE)
+				{
+					if ((!Synergy) && (g_iPlayerTeam[client] == 0)) // Unassigned Team? Fires in CSTRIKE?
+						return Plugin_Continue;
+
+					if (!IsClientObserver(client)) // Client is not an Observer/Spectator?
+						if (IsPlayerAlive(client)) // Fix for Valve causing Unassigned to not be detected as an Observer in CSS?
+							if (GetClientHealth(client) > 0) // Fix for Valve causing Unassigned to be alive?
 							{
-								if ((GetConVarFloat(hCvarTF2WFPTime) - 1.0) > 0.0)
+								ResetAttacker(client);
+								ResetObserver(client);
+
+								if (GetConVarFloat(hCvarSpawnTime) > 0.0) // Check if Spawn AFK is enabled.
 								{
-#if _DEBUG
-									LogDebug(false, "Event_PlayerTeamPost - Waiting for players event started");
+									g_iSpawnTime[client] = GetTime();
+#if _DEBUG > 1
+									LogDebug(false, "Event_PlayerSpawn - Client: %i Spawn Time: %i", client, g_iSpawnTime[client]);
 #endif
-									// Waiting for players
-									g_TF2_WFP_StartTime = GetTime();
-									bWaitRound = true;
 								}
 							}
-						}
+				}
+			}
+	}
+	return Plugin_Continue;
+}
+
+public Action Event_PlayerDeathPost(Handle event, const char[] name, bool dontBroadcast)
+{
+	if (g_bEnabled)
+	{
+		int client = GetClientOfUserId(GetEventInt(event,"userid"));
+
+#if _DEBUG
+		LogDebug(false, "Event_PlayerDeathPost - Client: %i", client);
+#endif
+		if (client > 0) // Check the client is not console/world?
+			if (IsValidClient(client)) // Check client is not a bot or otherwise fake player.
+			{
+				if (g_hAFKTimer[client] != INVALID_HANDLE)
+				{
+					iPlayerAttacker[client] = GetClientOfUserId(GetEventInt(event,"attacker"));
+
+					//if (CSGO)
+					//	GetClientEyeAngles(client, fEyeAngles[client]);
+
+					ResetSpawn(client);
+					bPlayerDeath[client] = true;
+
+					if (IsClientObserver(client))
+					{
+						iObserverMode[client] = GetEntProp(client, Prop_Send, "m_iObserverMode");
+						iObserverTarget[client] = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
 					}
 				}
 			}
+	}
+	return Plugin_Continue;
+}
 
-			// Update Player Team Details
+public Action Event_TeamplayRoundWin(Handle event, const char[] name, bool dontBroadcast)
+{
 #if _DEBUG
-			LogDebug(false, "Event_PlayerTeamPost - Client: %d is changing team", client);
-			LogDebug(false, "Event_PlayerTeamPost - Client: %d previous team: %d", client, iPlayerTeam[client]);
-			LogDebug(false, "Event_PlayerTeamPost - Client: %d previous team: %d previous team players: %d", client, iPlayerTeam[client], iTeamPlayers[iPlayerTeam[client]]);
+	LogDebug(false, "Event_TeamplayRoundWin");
 #endif
-			iTeamPlayers[iPlayerTeam[client]]--;
-			iPlayerTeam[client] = team;
-			iTeamPlayers[iPlayerTeam[client]]++;
+	if (g_bEnabled)
+		if ((TF2) && (g_bTF2Arena))
+			g_bWaitRound = true;
+	return Plugin_Continue;
+}
+
+public Action Event_ArenaRoundStart(Handle event, const char[] name, bool dontBroadcast)
+{
+#if _DEBUG
+	LogDebug(false, "Event_ArenaRoundStart");
+#endif
+	if (g_bEnabled)
+		if ((TF2) && (g_bTF2Arena))
+		{
+			for(int i = 1; i <= MaxClients; i++)
+				if (IsValidClient(i))
+					if (g_hAFKTimer[i] != INVALID_HANDLE)
+						if (g_iPlayerTeam[i] > 1) // Client is not Unassigned or on Spectator Team
+							if (IsPlayerAlive(i))
+								if (GetConVarFloat(hCvarSpawnTime) > 0.0)
+									if (g_iSpawnTime[i] != -1)
+										g_iSpawnTime[i] = GetTime();
+
+			g_bWaitRound = false;
+		}
+	return Plugin_Continue;
+}
+
+public Action Event_RoundStart(Handle event, const char[] name, bool dontBroadcast)
+{
+#if _DEBUG
+	LogDebug(false, "Event_RoundStart");
+#endif
+	if (g_bEnabled)
+		if (CSGO)
+		{
+#if _DEBUG
+			LogDebug(false, "Event_RoundStart - CSGO - Freeze Time: %i Warmup Period: %i", GetConVarInt(FindConVar("mp_freezetime")), GameRules_GetProp("m_bWarmupPeriod"));
+#endif
+			if (GameRules_GetProp("m_bWarmupPeriod") == 1)
+				g_bWaitRound = true;
+			else if (GameRules_GetProp("m_bWarmupPeriod") == 0)
+				if (GetConVarInt(FindConVar("mp_freezetime")) > 0)
+					g_bWaitRound = true;
+				else
+					g_bWaitRound = false;
+		}
+		else if ((CSTRIKE) && (GetConVarInt(FindConVar("mp_freezetime")) > 0))
+		{
+#if _DEBUG
+			LogDebug(false, "Event_RoundStart - Freeztime Pausing AFK");
+#endif
+			g_bWaitRound = true;
+		}
+
+	return Plugin_Continue;
+}
+
+public Action Event_RoundFreezeEnd(Handle event, const char[] name, bool dontBroadcast)
+{
+#if _DEBUG
+	LogDebug(false, "Event_RoundFreezeEnd");
+#endif
+	if (g_bEnabled)
+		if (CSGO)
+		{
+#if _DEBUG
+			LogDebug(false, "Event_RoundFreezeEnd - CSGO - Freeze Time: %i Warmup Period: %i", GetConVarInt(FindConVar("mp_freezetime")), GameRules_GetProp("m_bWarmupPeriod"));
+#endif
+			if (GetConVarInt(FindConVar("mp_freezetime")) > 0)
+				if (GameRules_GetProp("m_bWarmupPeriod") == 0)
+					g_bWaitRound = false;
+		}
+		else if ((CSTRIKE) && (GetConVarInt(FindConVar("mp_freezetime")) > 0))
+		{
+#if _DEBUG
+			LogDebug(false, "Event_RoundFreezeEnd - Freeztime Unpausing AFK");
+#endif
+			g_bWaitRound = false;
+		}
+	return Plugin_Continue;
+}
+
+/*
+public Action Event_JointeamFailed(Handle event, const char[] name, bool dontBroadcast)
+{
+#if _DEBUG
+	LogDebug(false, "Event_JointeamFailed");
+#endif
+	if (g_bEnabled)
+	{
+		int iReason = GetEventInt(event, "reason");
 
 #if _DEBUG
-			if (TF2)
-			{
-				LogDebug(false, "Event_PlayerTeamPost - AFTER - Red Team Players: %d Blue Team players: %d", iTeamPlayers[TF2_TEAM_RED], iTeamPlayers[TF2_TEAM_BLUE]);
-			}
+		LogDebug(false, "Event_JointeamFailed - Reason: %i", iReason);
 #endif
 
-			// Check client is not a bot or otherwise fake player.
-			if (IsValidClient(client, bExcludeBots))
-			{
-				// Check if player is joining a non spectator team.
-				if(team != g_sTeam_Index)
-				{
-					bJoinedTeam[client] = true; // Player joined a team
+		if (iReason == 0)
+			return Plugin_Handled;
+
+//0 "#Cstrike_TitlesTXT_Only_1_Team_Change" 
+//1 "#Cstrike_TitlesTXT_All_Teams_Full" 
+//2 "#Cstrike_TitlesTXT_Terrorists_Full" 
+//3 "#Cstrike_TitlesTXT_CTs_Full" 
+//4 "#Cstrike_TitlesTXT_Cannot_Be_Spectator" 
+//5 "#Cstrike_TitlesTXT_Humans_Join_Team_T" 
+//6 "#Cstrike_TitlesTXT_Humans_Join_Team_CT" 
+//7 "#Cstrike_TitlesTXT_Too_Many_Terrorists" 
+//8 "#Cstrike_TitlesTXT_Too_Many_CTs"
+	}
+	return Plugin_Continue;
+}
+*/
+
+
+// Timers
+public Action Timer_CheckPlayer(Handle Timer, int client) // General AFK Timers
+{
+#if _DEBUG
+	LogDebug(false, "Timer_CheckPlayer - Client: %i", client);
+#endif
+	if(g_bEnabled) // Is the AFK Manager Enabled
+	{
 #if _DEBUG > 1
-					LogDebug(false, "Event_PlayerTeamPost - Client: %d joined team: %d", client, team);
+		LogDebug(false, "Timer_CheckPlayer - Client: %i Plugin Enabled", client);
+#endif
+		if (!IsClientInGame(client)) // Client is not in Game (Map Change)
+		{
+#if _DEBUG > 1
+			LogDebug(false, "Timer_CheckPlayer - Client: %i is not in game", client);
+#endif
+			g_iAFKTime[client]++;
+			return Plugin_Continue;
+		}
+
+		if (GetEntityFlags(client) & FL_FROZEN) // Ignore FROZEN Clients
+		{
+#if _DEBUG > 1
+			LogDebug(false, "Timer_CheckPlayer - Client: %i is FROZEN.", client);
+#endif
+			g_iAFKTime[client]++;
+			return Plugin_Continue;
+		}
+
+		if (IsClientObserver(client))
+		{
+			int m_iObserverMode = GetEntProp(client, Prop_Send, "m_iObserverMode");
+#if _DEBUG > 1
+			LogDebug(false, "Timer_CheckPlayer - Client: %i is Observer Current Mode: %i", client, m_iObserverMode);
+#endif
+			if (iObserverMode[client] == -1) // Invalid Observer Mode
+			{
+#if _DEBUG > 1
+				LogDebug(false, "Timer_CheckPlayer - Client: %i has an invalid Observer Mode", client);
+#endif
+				iObserverMode[client] = m_iObserverMode;
+
+				//if (CSGO)
+				//	GetClientEyeAngles(client, fEyeAngles[client]);
+
+				//g_iAFKTime[client]++;
+				return Plugin_Continue;
+			}
+			else if (iObserverMode[client] != m_iObserverMode) // Player changed Observer Mode
+			{
+#if _DEBUG > 1
+				LogDebug(false, "Timer_CheckPlayer - Client: %i has changed Observer Mode Previous: %i", client, iObserverMode[client]);
+#endif
+				if (iObserverMode[client] == OBS_MODE_DEATHCAM)
+				{
+#if _DEBUG > 1
+				LogDebug(false, "Timer_CheckPlayer - Client: %i was in Death Cam", client);
+#endif
+					iObserverMode[client] = m_iObserverMode;
+
+					if (iObserverMode[client] != OBS_MODE_ROAMING)
+						iObserverTarget[client] = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
+
+					//if (CSGO)
+					//	GetClientEyeAngles(client, fEyeAngles[client]);
+
+					return Plugin_Continue;
+				}
+				else if (iObserverMode[client] == OBS_MODE_FREEZECAM)
+				{
+#if _DEBUG > 1
+				LogDebug(false, "Timer_CheckPlayer - Client: %i was in Freezecam", client);
+#endif
+					iObserverMode[client] = m_iObserverMode;
+
+					if (iObserverMode[client] != OBS_MODE_ROAMING)
+						iObserverTarget[client] = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
+
+					//if (CSGO)
+					//	GetClientEyeAngles(client, fEyeAngles[client]);
+
+					return Plugin_Continue;
+				}
+				
+				iObserverMode[client] = m_iObserverMode;
+
+#if _DEBUG > 1
+				LogDebug(false, "Timer_CheckPlayer - Client: %i has changed Observer Mode Previous Target: %i Current target: %i", client, iObserverTarget[client], GetEntPropEnt(client, Prop_Send, "m_hObserverTarget"));
 #endif
 
-					// Check if the player already has a valid timer.
-					if (hAFKTimers[client] == INVALID_HANDLE)
+				if (iObserverMode[client] != OBS_MODE_ROAMING)
+				{
+					int m_hObserverTarget = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
+
+					if ((iObserverTarget[client] == client) || (iObserverTarget[client] == iPlayerAttacker[client])) // Death Cam?
 					{
 #if _DEBUG > 1
-						LogDebug(false, "Event_PlayerTeamPost - Client: %d joined a team and does not have a valid timer? Re-Initializing client", client);
+						LogDebug(false, "Timer_CheckPlayer - Client: %i has changed Observer Mode and in Death Cam?", client);
 #endif
-						InitializePlayer(client);
+						iObserverTarget[client] = m_hObserverTarget;
+						return Plugin_Continue;
+					}
+					else if (!IsValidClient(m_hObserverTarget, false)) // No valid players left? Mass Suicide?
+					{
+						iObserverTarget[client] = m_hObserverTarget;
+						return Plugin_Continue;
 					}
 					else
+						iObserverTarget[client] = m_hObserverTarget;
+				}
+				SetClientAFK(client);
+				return Plugin_Continue;
+			}
+			else if (iObserverMode[client] != OBS_MODE_ROAMING)
+			{
+				int m_hObserverTarget = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
+
+#if _DEBUG > 1
+				LogDebug(false, "Timer_CheckPlayer - Client: %i Current Observer Target: %i", client, m_hObserverTarget);
+#endif
+
+				if (iObserverTarget[client] != m_hObserverTarget) // Player changed Observer Mode
+				{
+#if _DEBUG > 1
+					LogDebug(false, "Timer_CheckPlayer - Client: %i has changed Observer Target Previous: %i Current: %i", client, iObserverTarget[client], m_hObserverTarget);
+#endif
+					if (!IsValidClient(iObserverTarget[client], false)) // Previous Target is now invalid
+						iObserverTarget[client] = m_hObserverTarget;
+					else if (iObserverTarget[client] == client) // Previous target was the themselves
+						iObserverTarget[client] = m_hObserverTarget;
+					else if (!IsPlayerAlive(iObserverTarget[client])) // Previous target has died
+						iObserverTarget[client] = m_hObserverTarget;
+					else
 					{
-						if (!GetConVarBool(hCvarExcludeTeamChange))
-						{
-							// Reset AFK timer because they joined a team.
-							ResetPlayer(client);
-							return Plugin_Continue;
-						}
+#if _DEBUG > 1
+						LogDebug(false, "Timer_CheckPlayer - Client: %i has changed Observer Target Themselves.", client);
+#endif
+						iObserverTarget[client] = m_hObserverTarget;
+						SetClientAFK(client);
+						return Plugin_Continue;
 					}
 				}
-				else
-				{
-					// Player joined or was moved to spectator team?
-					ResetAttacker(client);
-#if _DEBUG > 1
-					LogDebug(false, "Event_PlayerTeamPost - Client: %d joined spectator team", client);
-#endif
-				}
-#if _DEBUG > 1
-				LogDebug(false, "Event_PlayerTeamPost - Client: %d Old Eye Angles: %f %f %f", client, fEyePosition[client][0], fEyePosition[client][1], fEyePosition[client][2]);
-				LogDebug(false, "Event_PlayerTeamPost - Client: %d Old Mode: %i Old Target: %i", client, iSpecMode[client], iSpecTarget[client]);
-#endif
-				if (bJoinedTeam[client]) // Player moved from unassigned?
-				{
-					// Setting new AFK details to ensure timer continues
-					// Get New Player Eye Angles
-					GetClientEyeAngles(client, fEyePosition[client]);
+			}
+		}
+		
 
-					// Get New Player Map Origin
-					GetClientAbsOrigin(client, fMapPosition[client]);
-
-					iSpecMode[client] = GetEntProp(client, Prop_Send, "m_iObserverMode");
-					iSpecTarget[client] = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
+		int Time = GetTime();
+		if (!bPlayerAFK[client]) // Player Marked as not AFK?
+		{
+			if ((g_iSpawnTime[client] > 0) && ((Time - g_iSpawnTime[client]) < 2)) // Check if player has just spawned
+				SetClientAFK(client, false);
+			else if ((!IsPlayerAlive(client)) && (iObserverTarget[client] == client)) // Player is in death cam?
+			{
 #if _DEBUG > 1
-					LogDebug(false, "Event_PlayerTeamPost - Client: %d New Eye Angles: %f %f %f", client, fEyePosition[client][0], fEyePosition[client][1], fEyePosition[client][2]);
-					LogDebug(false, "Event_PlayerTeamPost - Client: %d New Mode: %i New Target: %i", client, iSpecMode[client], iSpecTarget[client]);
+				LogDebug(false, "Timer_CheckPlayer - Client: %i Player in death cam?", client);
 #endif
-				}
-				else
-					bJoinedTeam[client] = true; // Player moved from Unassigned?
+				SetClientAFK(client, false);
 			}
 			else
 			{
 #if _DEBUG > 1
-				LogDebug(false, "Event_PlayerTeamPost - Client: %d is a fake client?", client);
+				LogDebug(false, "Timer_CheckPlayer - Client: %i was previously not AFK, setting AFK", client);
 #endif
+				SetClientAFK(client);
 			}
-		}
-	}
-	return Plugin_Continue;
-}
-
-public Action:Event_PlayerDeathPost(Handle:event, const String:name[], bool:dontBroadcast)
-{
-	new client = GetClientOfUserId(GetEventInt(event,"userid"));
-	iPlayerAttacker[client] = GetClientOfUserId(GetEventInt(event,"attacker"));
-
-#if _DEBUG
-	LogDebug(false, "Event_PlayerDeathPost - Client: %d died", client);
-#endif
-
-	for (new i = 1; i <= GetMaxClients(); i++) // Update observer targets for all who were targeting the dead client
-	{
-		if (i != client)
-		{
-			if (iSpecTarget[i] == client)
-			{
-				iSpecTarget[i] = GetEntPropEnt(i, Prop_Send, "m_hObserverTarget");
-#if _DEBUG
-				LogDebug(false, "Event_PlayerDeathPost - Client: %d Updating Client: %d Spec Target: %i", client, i, iSpecTarget[i]);
-#endif
-
-				if (!IsValidClient(iSpecTarget[i]))
-					iSpecTarget[i] = -1;
-			}
-		}
-	}
-
-	if (IsValidClient(client, bExcludeBots))
-	{
-		// Set Observer settings
-		iSpecMode[client] = GetEntProp(client, Prop_Send, "m_iObserverMode");
-		iSpecTarget[client] = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
-#if _DEBUG
-		LogDebug(false, "Event_PlayerDeathPost - Client: %d Observer Mode: %i Observer target: %i", client, iSpecMode[client], iSpecTarget[client]);
-#endif
-	}
-
-
-
-	// Check if suicide (Which is required for some mods)
-	if (iPlayerAttacker[client] != client)
-	{
-#if _DEBUG > 1
-		LogDebug(false, "Event_PlayerDeathPost - Client: %d Attacker: %d AFK status will be reset", client, iPlayerAttacker[client]);
-#endif
-		if (IsValidClient(client, bExcludeBots))
-			ResetSpawn(client); // Stop AFK Spawn Timer if still running
-
-		ResetPlayer(iPlayerAttacker[client]); // Reset attackers status when he kills someone.
-	}
-	return Plugin_Continue;
-}
-
-public Action:Event_RoundStart(Handle:event, const String:name[], bool:dontBroadcast)
-{
-	// Round Started
-#if _DEBUG
-	LogDebug(false, "Event_RoundStart - Round Started Text: %s", name);
-#endif
-
-	new bool:FullReset = GetEventBool(event, "full_reset");
-
-	if (FullReset)
-	{
-#if _DEBUG
-		LogDebug(false, "Event_RoundStart - Round Started and is FULL RESET");
-#endif
-	}
-
-	// Waiting for Players should now be over?
-
-	// Un-pause Plugin After Map Transition?
-	if (bWaitRound)
-	{
-		if (g_TF2_WFP_StartTime > 0)
-		{
-			if (hCvarTF2WFPTime != INVALID_HANDLE)
-			{
-				if ( (GetTime() - g_TF2_WFP_StartTime) > (GetConVarFloat(hCvarTF2WFPTime) - 1.0) )
-				{
-					// Waiting for players is now over?
-#if _DEBUG
-					LogDebug(false, "Event_RoundStart - Waiting for players event ended");
-#endif
-					g_TF2_WFP_StartTime = 0;
-					bWaitRound = false;
-				}
-				else
-				{
-#if _DEBUG
-					LogDebug(false, "Event_RoundStart - Round Started but waiting for players is still active.");
-#endif
-				}
-			}
-		}
-		else
-		{
-#if _DEBUG
-			LogDebug(false, "Event_RoundStart - Round Started and waiting for players is now over.");
-#endif
-			bWaitRound = false;
-		}
-
-		// Initialize Settings
-		//if (GetConVarBool(hCvarEnabled))
-		//{
-		//	AFK_Initialize();
-		//}
-	}
-	return Plugin_Continue;
-}
-
-public Action:Event_StaleMate(Handle:event, const String:name[], bool:dontBroadcast)
-{
-	// TF2 Stalemate?
-#if _DEBUG
-	LogDebug(false, "Event_StaleMate - StaleMate Started");
-#endif
-
-	bWaitRound = true;
-	return Plugin_Continue;
-}
-
-
-// Player Chat
-public Action:Command_Say(client, const String:command[], args)
-{
-	if (GetConVarBool(hCvarEnabled))
-	{
-		// Reset timers once player has said something in chat.
-		ResetPlayer(client);
-	}
-	return Plugin_Continue;
-}
-
-
-/*
-// Menu Functions
-CreateAFKMenu(client)
-{
-	if (hAFKMenu[client] != INVALID_HANDLE)
-	{
-		CancelClientMenu(client);
-		hAFKMenu[client] = INVALID_HANDLE;
-	}
-
-	hAFKMenu[client] = CreateMenu(AFKMenuSelected);
-	SetMenuTitle(menu,"[AFK Manager] %T", "Menu_Title");
-
-	//PrintToConsole(attacker, "[Anti-TK] %t", "TK_Message_TKer", victimName);
-	//PrintToChat(attacker, "%c[Anti-TK]%c %t", ANTITK_COLOR, 1, "TK_Message_TKer", victimName);
-
-	// Disable Exit
-	SetMenuExitButton(hAFKMenu[client], false);
-
-	decl String:MenuItem[128];
-
-	Format(MenuItem, sizeof(MenuItem),"%T", "Menu_AFK", victim);
-	AddMenuItem(hAFKMenu[client],"1",MenuItem);
-
-	//"You are currently AFK"
-
-#if _DEBUG
-	LogDebug(false, "Displaying AFK menu to client: %d", client);
-#endif
-	DisplayMenu(hAFKMenu[client],client,MENU_TIME_FOREVER);
-}
-
-public AFKMenuSelected(Handle:menu, MenuAction:action, param1, param2)
-{
-	new client = param1;
-
-	decl String:tmp[32], pMenuItemSelected;
-	GetMenuItem(menu, param2, tmp, sizeof(tmp));
-	pMenuItemSelected = StringToInt(tmp);
-
-	switch (action)
-	{
-		case MenuAction_Select:
-		{
-			switch (pMenuItemSelected)
-			{
-				default:
-				{
-#if _DEBUG
-					LogDebug(false, "AFKMenuSelected - Client: %d has selected item: %i", client, pMenuItemSelected);
-#endif
-					ResetPlayer(client);
-				}
-			}
-		}
-
-		case MenuAction_Cancel:
-		{
-#if _DEBUG
-			LogDebug(false, "AFKMenuSelected - Client: %d has cancelled the AFK Menu", client);
-#endif
-		}
-
-		case MenuAction_End:
-		{
-#if _DEBUG
-			LogDebug(false, "AFKMenuSelected - Ended menu for Client: %d", client);
-#endif
-			CloseHandle(menu);
-		}
-	}
-}
-*/
-
-
-// AFK Timers
-
-// Game Event Based AFK Timers
-public Action:Timer_PlayerSpawn_Delay(Handle:timer, any:serial)
-{
-	new client = GetClientFromSerial(serial); // Validate the client serial
-
-	if (client == 0) // The serial is no longer valid, the player must have disconnected
-		return Plugin_Stop;
-	else
-	{
-		if (!IsClientObserver(client))
-			if (IsPlayerAlive(client))
-			{
-				// Get New Player Eye Angles
-				GetClientEyeAngles(client, fEyePosition[client]);
-#if _DEBUG > 2
-				LogDebug(false, "Timer_PlayerSpawn_Origin - Client %i Eye Angles: %f %f %f", client, fEyePosition[client][0], fEyePosition[client][1], fEyePosition[client][2]);
-#endif
-
-				// Get New Player Map Origin
-				GetClientAbsOrigin(client, fMapPosition[client]);
-#if _DEBUG > 1
-				LogDebug(false, "Timer_PlayerSpawn_Origin - Client %i Origin: %f %f %f", client, fMapPosition[client][0], fMapPosition[client][1], fMapPosition[client][2]);
-#endif
-			}
-	}
-	return Plugin_Continue;
-}
-
-// General AFK Timers
-public Action:Timer_CheckPlayer(Handle:Timer, any:client)
-{
-#if _DEBUG >= 2
-	LogDebug(false, "Timer_CheckPlayer - Executing Timer Check on Client: %d", client);
-#endif
-	// Is the AFK Manager Enabled
-	if(GetConVarBool(hCvarEnabled))
-	{
-		// Are we waiting for the round to start
-		if (bWaitRound)
-		{
-#if _DEBUG >= 2
-			LogDebug(false, "Timer_CheckPlayer - Client: %d We are waiting for round to start", client);
-#endif
 			return Plugin_Continue;
 		}
 
-		// Do we have enough players to start any checks
-		if ((bMovePlayers == false) && (bKickPlayers == false))
-		{
-			// Not enough players to enable plugin.
-			return Plugin_Continue;
-		}
-
-		// Is this player actually in the game?
-		if (IsClientInGame(client))
-		{
-#if _DEBUG > 2
-			LogDebug(false, "Timer_CheckPlayer - Checking if Client is AFK.");
-#endif
-			new Action:timer_result = CheckForAFK(client);
-			if (timer_result != Plugin_Stop)
-				return timer_result;
-		}
-		else
-			return Plugin_Continue;
-	}
-
-	hAFKTimers[client] = INVALID_HANDLE;
-	return Plugin_Stop;
-}
-
-// Spawn AFK Timer
-public Action:Timer_AFKSpawn(Handle:Timer, any:client)
-{
-#if _DEBUG > 1
-	LogDebug(false, "Timer_AFKSpawn - Executing Timer Check on Client: %d", client);
-#endif
-	// Is the AFK Manager Enabled
-	if(GetConVarBool(hCvarEnabled))
-	{
-		if ((GetTime() - iSpawnTime[client]) > GetConVarInt(hCvarSpawnTime)) {
-			iSpawnTime[client] = -1;
-			hAFKSpawnTimers[client] = INVALID_HANDLE;
-			return Plugin_Stop;
-		}
-
-		// Are we waiting for the round to start
-		if (bWaitRound)
+		if (g_bWaitRound) // Are we waiting for the round to start
 		{
 #if _DEBUG > 1
-			LogDebug(false, "Timer_AFKSpawn - Client: %d We are waiting for round to start", client);
+			LogDebug(false, "Timer_CheckPlayer - Client: %i is waiting for round", client);
 #endif
+			if (g_iSpawnTime[client] != -1)
+				g_iSpawnTime[client]++;
+			g_iAFKTime[client]++;
 			return Plugin_Continue;
 		}
 
-		// Do we have enough players to start any checks
-		if ((bMovePlayers == false) && (bKickPlayers == false))
-		{
-			// Not enough players to enable plugin.
-			return Plugin_Continue;
-		}
-
-		if (IsClientConnected(client) && IsClientInGame(client))
-		{
-			if (CheckForAFKSpawn(client) == Plugin_Stop)
+		if ((TF2) && (g_bTF2Arena))
+			if ((g_iPlayerTeam[client] == g_iSpec_Team) && (GetEntProp(client, Prop_Send, "m_bArenaSpectator") == 0)) // Arena Waiting Mode
 			{
-				iSpawnTime[client] = -1;
-				hAFKSpawnTimers[client] = INVALID_HANDLE;
-				return Plugin_Stop;
+				g_iAFKTime[client]++;
+				return Plugin_Continue;
 			}
-		}
-		else
+
+		if ((bMovePlayers == false) && (bKickPlayers == false)) // Do we have enough players to start taking action
 		{
-			iSpawnTime[client] = -1;
-			hAFKSpawnTimers[client] = INVALID_HANDLE;
-			return Plugin_Stop;
+			g_iAFKTime[client]++;
+			return Plugin_Continue;
 		}
-	}
-	else
-	{
-		iSpawnTime[client] = -1;
-		hAFKSpawnTimers[client] = INVALID_HANDLE;
-		return Plugin_Stop;
-	}
 
-	return Plugin_Continue;
-}
-
-
-// AFK Observer/Spectator Check
-bool:CheckObserverAFK(client)
-{
-	if ((!Synergy) && (bJoinedTeam[client] == false))
-	{
+#if _DEBUG > 1
+		LogDebug(false, "Timer_CheckPlayer - Client: %i Not waiting for round and have minimum players", client);
+#endif
+#if _DEBUG > 1
+		LogDebug(false, "Timer_CheckPlayer - Client: %i Team: %i", client, g_iPlayerTeam[client]);
+#endif
+		if ((Synergy) || ((g_iPlayerTeam[client] != 0) && (g_iPlayerTeam[client] != g_iSpec_Team))) // Make sure player is not Unassigned or Spectator
+			if (!IsPlayerAlive(client) && (g_bExcludeDead)) // Excluding Dead players
+			{
 #if _DEBUG
-		LogDebug(false, "CheckObserverAFK - Client: %i has not joined team", client);
+				LogDebug(false, "Timer_CheckPlayer - Client: %i Exclude Dead: %b", client, g_bExcludeDead);
 #endif
-		return true;
-	}
-
-/*
-	if (TF2)
-	{
-		// TF2 Arena Checks
-		if (bTF2Arena)
-		{
-			// Player is Observing but not a proper spectator? Side note this will I guess stop dead player checks?
-			if (GetEntProp(client, Prop_Send, "m_bArenaSpectator") == 0)
-			{
-#if _DEBUG > 1
-				LogDebug(false, "CheckObserverAFK - Client: %i Observer if waiting to play TF2 Arena?", client);
-#endif
-				return false;
+				g_iAFKTime[client]++;
+				return Plugin_Continue;
 			}
-		}
-	}
-*/
 
-#if _DEBUG > 1
-	LogDebug(false, "CheckObserverAFK - Client: %d Previous Observer Mode: %i", client, iSpecMode[client]);
-#endif
-	// Store Last Spec Mode
-	new g_Last_Mode = iSpecMode[client];
 
-	// Check Current Spectator Mode
-	iSpecMode[client] = GetEntProp(client, Prop_Send, "m_iObserverMode");
-#if _DEBUG > 1
-	LogDebug(false, "CheckObserverAFK - Client: %d Current Observer Mode: %i", client, iSpecMode[client]);
-#endif
-#if _DEBUG > 2
-	LogDebug(false, "CheckObserverAFK - Client: %d DEBUG Observer Target: %i", client, GetEntPropEnt(client, Prop_Send, "m_hObserverTarget"));
-#endif
+		int AFKSpawnTimeleft = -1;
+		int AFKSpawnTime;
+		int cvarSpawnTime;
 
-	if (g_Last_Mode == 0) // Player was just moved to Spectator? We have now stored new values.
-	{
-#if _DEBUG > 1
-		LogDebug(false, "CheckObserverAFK - Client: %d was just moved to spectator storing new values Last Mode: %i", client, g_Last_Mode);
-#endif
-		if (iSpecMode[client] == g_Spec_FL_Mode)
-			CheckSamePosition(client);
-		else
-			iSpecTarget[client] = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
-#if _DEBUG > 1
-		LogDebug(false, "CheckObserverAFK - Client: %d new values Mode: %i Target: %i", client, iSpecMode[client], iSpecTarget[client]);
-#endif
-		return true;
-	}
-	else if (g_Last_Mode > 0)
-	{
-		if ((g_Last_Mode != g_Spec_FL_Mode) && (iSpecTarget[client] < 1)) // Check that last mode was not free look and that the target was valid?
+		if ((g_iSpawnTime[client] > 0) && (!IsPlayerAlive(client))) // Check Spawn Time and Player Alive
 		{
-#if _DEBUG > 1
-			LogDebug(false, "CheckObserverAFK - Client: %d previous follow target was invalid? Target: %i", client, iSpecTarget[client]);
+#if _DEBUG
+			LogDebug(false, "Timer_CheckPlayer - Client: %i AFK Spawn Time: %i Player has died", client, AFKSpawnTime);
 #endif
-			if (iSpecMode[client] != g_Spec_FL_Mode)
-			{
-				iSpecTarget[client] = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
-#if _DEBUG > 1
-				LogDebug(false, "CheckObserverAFK - Client: %d Current Target: %i", client, iSpecTarget[client]);
-#endif
-
-				if (IsValidClient(iSpecTarget[client], false) && !IsPlayerAlive(iSpecTarget[client]))
-					iSpecTarget[client] = -1;
-			}
-#if _DEBUG > 2
-			LogDebug(false, "CheckObserverAFK - Client: %d Spec Target: %i", client, iSpecTarget[client]);
-#endif
-			return true;
-		}
-
-		if (iSpecMode[client] != g_Last_Mode) // Check if Spectator Mode Changed
-		{
-#if _DEBUG > 1
-			LogDebug(false, "CheckObserverAFK - Client: %i Observer has changed modes? Old: %i New: %i", client, g_Last_Mode, iSpecMode[client]);
-#endif
-			if (g_Last_Mode != g_Spec_FL_Mode) // Check that last mode was not free look
-			{
-				if (!IsValidClient(iSpecTarget[client], false)) // and that the target was valid?
-				{
-#if _DEBUG > 1
-					LogDebug(false, "CheckObserverAFK - Client: %d changed modes but previous follow target was invalid? Target: %i", client, iSpecTarget[client]);
-#endif
-					iSpecTarget[client] = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
-					return true;
-				}
-				else if ((iSpecTarget[client] == client) || (iSpecTarget[client] == iPlayerAttacker[client])) // Last target was ourselves or attacker, probably death cam?
-				{
-#if _DEBUG > 1
-					LogDebug(false, "CheckObserverAFK - Client: %d changed modes but previous target was themselves or attacker? Target: %i", client, iSpecTarget[client]);
-#endif
-					if (iSpecMode[client] == g_Spec_FL_Mode)
-						CheckSamePosition(client);
-					else
-						iSpecTarget[client] = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
-					return true;
-				}
-			}
-			if (iPlayerAttacker[client] != -1)
-				ResetAttacker(client);
-			return false;
-		}
-
-		if (iSpecMode[client] == g_Spec_FL_Mode) // Free Look Mode
-		{
-			if (iSpecTarget[client] > 0)
-				iSpecTarget[client] = 0;
-#if _DEBUG > 1
-			LogDebug(false, "CheckObserverAFK - Client: %i is in free look mode", client);
-#endif
-			if (CheckSamePosition(client)) // Check if we are in the same position and looking at the same place.
-				return true;
-		}
-		else
-		{
-			// Check Spectator Target
-			new g_Last_Spec = iSpecTarget[client];
-#if _DEBUG > 1
-			LogDebug(false, "CheckObserverAFK - Client: %d Previous Observer Target: %i", client, g_Last_Spec);
-#endif
-
-			iSpecTarget[client] = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
-#if _DEBUG > 1
-			LogDebug(false, "CheckObserverAFK - Client: %d Current Observer Target: %i", client, iSpecTarget[client]);
-#endif
-
-			if (g_Last_Spec > 0)
-			{
-				if ((iPlayerAttacker[client] != -1) && (iSpecTarget[client] != iPlayerAttacker[client]))
-					ResetAttacker(client);
-
-				if (GetConVarBool(hCvarSpecCheckTarget))
-				{
-					// Check if we are spectating the same player.
-					if (iSpecTarget[client] != g_Last_Spec)
-					{
-#if _DEBUG > 1
-						LogDebug(false, "CheckObserverAFK - Client %i Observer looking at new target? Old: %i New: %i", client, g_Last_Spec, iSpecTarget[client]);
-#endif
-						if (IsValidClient(g_Last_Spec, false)) // Check if old target is still valid
-						{
-#if _DEBUG > 1
-							LogDebug(false, "CheckObserverAFK - Client: %i Observer old target is a valid client? Old: %i", client, g_Last_Spec);
-#endif
-							if (g_Last_Spec == client)
-							{
-#if _DEBUG > 1
-								LogDebug(false, "CheckObserverAFK - Client: %d Old target is the client? Old: %i", client, g_Last_Spec);
-#endif
-							}
-							else if (!IsPlayerAlive(g_Last_Spec)) // Check if old target has died
-							{
-#if _DEBUG > 1
-								LogDebug(false, "CheckObserverAFK - Client: %i Observer old target is valid but they are now dead? Old: %i", client, g_Last_Spec);
-#endif
-								return true;
-							}
-							else
-							{
-#if _DEBUG > 1
-								LogDebug(false, "CheckObserverAFK - Client: %i Observer old target is still alive? Probably switched players? Old: %i", client, g_Last_Spec);
-#endif
-								return false;
-							}
-						}
-						else
-						{
-#if _DEBUG > 1
-							LogDebug(false, "CheckObserverAFK - Client: %i Observer old target is not a valid player? Probably disconnected? Old: %i", client, g_Last_Spec);
-#endif
-							return false;
-						}
-					}
-					else
-					{
-						return true; // Spectating the same player
-					}
-				}
-				else
-				{
-					return true; // Not checking spectator target changes
-				}
-			}
-			else
-			{
-#if _DEBUG > 1
-				LogDebug(false, "CheckObserverAFK - Client: %d previous chase cam target invalid: %i", client, g_Last_Spec);
-#endif
-				return true; // We were not following a valid player?
-			}
-		}
-	}
-
-#if _DEBUG > 1
-	LogDebug(false, "CheckObserverAFK - Client: %i Observer is not AFK?", client);
-#endif
-	return false;
-}
-
-// Check Player Position & Eye Angle Values
-bool:CheckSamePosition(client)
-{
-	// Check if player is frozen?
-	if(GetEntityFlags(client) & FL_FROZEN)
-	{
-#if _DEBUG > 2
-		LogDebug(false, "CheckSamePosition - Client: %d is frozen.", client);
-#endif
-		return false;
-	}
-
-	// Store Previous Eye Angle/Origin Values
-	decl Float:f_Eye_Loc[3];
-	f_Eye_Loc = fEyePosition[client];
-
-	// Get New Player Eye Angles
-	GetClientEyeAngles(client, fEyePosition[client]);
-
-	// Store Previous Map Location Values
-	decl Float:f_Map_Loc[3];
-	f_Map_Loc = fMapPosition[client];
-
-	// Get New Player Map Origin
-	GetClientAbsOrigin(client, fMapPosition[client]);
-
-#if _DEBUG > 1
-	LogDebug(false, "CheckSamePosition - Client: %d Checking Player Eye Angles: Old Angle: %f %f %f New Angle: %f %f %f", client, f_Eye_Loc[0], f_Eye_Loc[1], f_Eye_Loc[2], fEyePosition[client][0], fEyePosition[client][1], fEyePosition[client][2]);
-	LogDebug(false, "CheckSamePosition - Client: %d Checking Player Position: Old Position: %f %f %f New Position: %f %f %f", client, f_Map_Loc[0], f_Map_Loc[1], f_Map_Loc[2], fMapPosition[client][0], fMapPosition[client][1], fMapPosition[client][2]);
-#endif
-	
-	new Float:Threshold = GetConVarFloat(hCvarLocationThreshold);
-	// Check Location (Origin) now including thresholds.
-	if ((FloatAbs(fMapPosition[client][0] - f_Map_Loc[0]) < Threshold) &&
-		(FloatAbs(fMapPosition[client][1] - f_Map_Loc[1]) < Threshold) &&
-		(FloatAbs(fMapPosition[client][2] - f_Map_Loc[2]) < Threshold))
-	{
-#if _DEBUG > 1
-		LogDebug(false, "CheckSamePosition - Client: %i is within movement threshold.", client);
-#endif
-
-		if (Synergy)
-		{
-			// Check if player is using a device like a turret?
-			decl UseEntity;
-			UseEntity = GetEntPropEnt(client, Prop_Send, "m_hUseEntity");
-
-			if (UseEntity != -1)
-			{
-				// Check viewing angles?
-#if _DEBUG > 2
-				LogDebug(false, "CheckSamePosition - Checking Player Turret Angles");
-#endif
-				GetEntPropVector(UseEntity, Prop_Send, "m_angRotation", fEyePosition[3]);
-#if _DEBUG > 2
-				LogDebug(false, "CheckSamePosition - Turret Angles: %f %f %f", fEyePosition[client][0], fEyePosition[client][1], fEyePosition[client][2]);
-#endif
-			}
-		}
-
-		// Check Eye Angles
-		if ((fEyePosition[client][0] == f_Eye_Loc[0]) &&
-			(fEyePosition[client][1] == f_Eye_Loc[1]) &&
-			(fEyePosition[client][2] == f_Eye_Loc[2]))
-		{
-#if _DEBUG > 1
-			LogDebug(false, "CheckSamePosition - Client: %i Eye Angles: Old Angle: %f %f %f New Angle: %f %f %f", client, f_Eye_Loc[0], f_Eye_Loc[1], f_Eye_Loc[2], fEyePosition[client][0], fEyePosition[client][1], fEyePosition[client][2]);
-			LogDebug(false, "CheckSamePosition - Client: %i eye angles have not changed.", client);
-#endif
-			return true;
-		}
-	}
-	return false;
-}
-
-
-// Check if a player is AFK
-Action:CheckForAFK(client)
-{
-#if _DEBUG > 1
-	LogDebug(false, "CheckForAFK - CHECKING CLIENT: %i FOR AFK", client);
-#endif
-	new g_TeamNum = GetClientTeam(client);
-
-	// Unassigned, Spectator or Dead Player
-	if (IsClientObserver(client))
-	{
-#if _DEBUG > 1
-	LogDebug(false, "CheckForAFK - Client: %i is an Observer", client);
-#endif
-		if ((Synergy) || (g_TeamNum > 0))
-		{
-			// GetAliveClients
-			
-			if (!IsPlayerAlive(client))
-			{
-				// Make sure player is not a spectator (Which is dead)
-				if (g_TeamNum != g_sTeam_Index)
-					if (GetConVarBool(hCvarExcludeDead)) // Excluding Dead Players?
-						return Plugin_Continue;
-/*
-					else if (GetAliveClients(g_TeamNum) <= 1) // Only one player left alive on players team?
-						return Plugin_Continue;
-*/
-			}
-		}
-
-		if (CheckObserverAFK(client))
-			fAFKTime[client] = (fAFKTime[client] + AFK_CHECK_INTERVAL);
-		else
-			fAFKTime[client] = 0.0;
-	}
-	else
-	{
-#if _DEBUG > 1
-	LogDebug(false, "CheckForAFK - Client: %i is NOT an Observer", client);
-#endif
-		// Normal player
-		if (CheckSamePosition(client))
-			fAFKTime[client] = (fAFKTime[client] + AFK_CHECK_INTERVAL);
-		else
-		{
 			ResetSpawn(client);
-			fAFKTime[client] = 0.0;
 		}
-	}
-
-	new AdminsImmune = GetConVarInt(hCvarAdminsImmune);
-
-	if (fAFKTime[client] > 0.0)
-	{
-		// Check if AFK Move is enabled
-		if (GetConVarBool(hCvarMoveSpec))
+		
+		if (g_iSpawnTime[client] > 0)
 		{
-			// Check we are not moving from Spectator team to Spectator team
-			if (g_TeamNum != g_sTeam_Index)
+			cvarSpawnTime = GetConVarInt(hCvarSpawnTime);
+
+			if (cvarSpawnTime > 0)
 			{
-				// Check we have enough minimum players
+				AFKSpawnTime = Time - g_iSpawnTime[client];
+				//if (AFKSpawnTime <= 1)
+				//	AFKSpawnTimeleft = cvarSpawnTime;
+				//else
+				AFKSpawnTimeleft = cvarSpawnTime - AFKSpawnTime;
+#if _DEBUG
+				LogDebug(false, "Timer_CheckPlayer - Client: %i AFK Spawn Time: %i AFK Spawn Timeleft: %i Round 1: %i Round 2: %i", client, AFKSpawnTime, AFKSpawnTimeleft, AFKSpawnTime%AFK_WARNING_INTERVAL, AFKSpawnTime-AFKSpawnTime%AFK_WARNING_INTERVAL);
+#endif
+			}
+		}
+
+		int AFKTime = g_iAFKTime[client] >= 0 ? Time - g_iAFKTime[client] : 0;
+
+#if _DEBUG > 1
+		LogDebug(false, "Timer_CheckPlayer - Client: %i AFK Time: %i", client, AFKTime);
+#endif
+		if (g_iPlayerTeam[client] != g_iSpec_Team) // Check we are not on the Spectator team
+		{
+			if (GetConVarBool(hCvarMoveSpec))
+			{
 				if (bMovePlayers == true)
 				{
-					// Check Admin Immunity
-					if ( (AdminsImmune == 0) || (AdminsImmune == 2) || (!CheckAdminImmunity(client)) )
+					if ( (g_iPlayerImmunity[client] == AFKImmunity_None) || (g_iPlayerImmunity[client] == AFKImmunity_Kick) ) // Check Admin Immunity
 					{
-						new Float:afk_move_time = GetConVarFloat(hCvarTimeToMove);
-
-						// Is the AFK Move time greater than 0 seconds?
-						if (afk_move_time > 0.0)
+						if (g_iTimeToMove > 0)
 						{
-							new Float:afk_move_timeleft = (afk_move_time - fAFKTime[client]);
-
-#if _DEBUG > 2
-							LogDebug(false, "CheckForAFK - Move Time: %f AFK Time: %f AFK Timeleft: %f AFK Warn Time: %f", GetConVarFloat(hCvarTimeToMove), fAFKTime[client], afk_move_timeleft, GetConVarFloat(hCvarWarnTimeToMove));
+							int AFKMoveTimeleft = g_iTimeToMove - AFKTime;
+#if _DEBUG
+							LogDebug(false, "Timer_CheckPlayer - Client: %i AFK Time: %i Move Timeleft: %i", client, AFKTime, AFKMoveTimeleft);
 #endif
-							if ( afk_move_timeleft <= GetConVarFloat(hCvarWarnTimeToMove) )
-							{
-								// Is there still time to warn the client?
-								if (afk_move_timeleft > 0.0)
-								{
-									// Warn the player they are being flagged as AFK.
-#if _DEBUG > 2
-									LogDebug(false, "CheckForAFK - Checking AFK Time (Move): Client: %d Timeleft: %f", client, afk_move_timeleft);
-#endif
-									
-									new AFKSpawnTimeleft = -1;
-
-									if (iSpawnTime[client] > 0)
+							//if (AFKMoveTimeleft >= 0)
+							//{
+								if (AFKSpawnTimeleft >= 0)
+									if (AFKSpawnTimeleft < AFKMoveTimeleft) // Spawn time left is less than total AFK time left
 									{
-										new cvarSpawnTime = GetConVarInt(hCvarSpawnTime);
-
-										if (cvarSpawnTime > 0)
-											AFKSpawnTimeleft = cvarSpawnTime - (GetTime() - iSpawnTime[client]);
-									}
-
-									if ((AFKSpawnTimeleft == -1) || (afk_move_timeleft < AFKSpawnTimeleft))
-									{
-										if (GetConVarBool(hCvarLanguage))
-											AFK_PrintToChat(client, "%T", "Move_Warning", LANG_SERVER, RoundToFloor(afk_move_timeleft));
-										else
-											AFK_PrintToChat(client, "%t", "Move_Warning", RoundToFloor(afk_move_timeleft));
-									}
-									return Plugin_Continue;
-								}
-								else
-								{
-#if _DEBUG > 2
-									LogDebug(false, "CheckForAFK - Moving AFK Client: %i to Spectator for General AFK.", client);
+										if (AFKSpawnTime >= cvarSpawnTime) // Take Action on AFK Spawn Player
+										{
+#if _DEBUG
+											LogDebug(false, "Timer_CheckPlayer - Client: %i Exceeded Spawn Move AFK Time", client);
 #endif
-
-									// Are we moving player from the Unassigned team AKA team 0?
-									if (g_TeamNum == 0)
+											ResetSpawn(client);
+											if (g_iPlayerTeam[client] == 0) // Are we moving player from the Unassigned team AKA team 0?
+												return MoveAFKClient(client, GetConVarBool(hCvarWarnUnassigned)); // Are we warning unassigned players?
+											else
+												return MoveAFKClient(client);
+										}
+										else if (AFKSpawnTime%AFK_WARNING_INTERVAL == 0) // Warn AFK Spawn Player
+										{
+#if _DEBUG > 1
+											LogDebug(false, "Timer_CheckPlayer - Client: %i Checking Spawn Move Warning AFK Spawn Timeleft: %i", client, AFKSpawnTimeleft);
+#endif
+											if ((cvarSpawnTime - AFKSpawnTime) <= GetConVarInt(hCvarWarnSpawnTime))
+												AFK_PrintToChat(client, "%t", "Spawn_Move_Warning", AFKSpawnTimeleft);
+										}
+										return Plugin_Continue;
+									}
+#if _DEBUG > 1
+								LogDebug(false, "Timer_CheckPlayer - Client: %i AFK Time: %i ConVar Move Time: %i", client, AFKTime, g_iTimeToMove);
+#endif
+								if (AFKTime >= g_iTimeToMove) // Take Action on AFK Player
+								{
+#if _DEBUG
+									LogDebug(false, "Timer_CheckPlayer - Client: %i Exceeded Move AFK Time", client);
+#endif
+									if (g_iPlayerTeam[client] == 0) // Are we moving player from the Unassigned team AKA team 0?
 										return MoveAFKClient(client, GetConVarBool(hCvarWarnUnassigned)); // Are we warning unassigned players?
 									else
 										return MoveAFKClient(client);
 								}
-							}
-							else
-								return Plugin_Continue;
-						}
-						else
-						{
-							// AFK Move is enabled but move time is 0 seconds?
-#if _DEBUG > 2
-							LogDebug(false, "CheckForAFK - Not Checking General AFK Move as move time is less than or equal to 0?");
-#endif
-							return Plugin_Continue;
-						}
-					}
-				}
-				else
-				{
-#if _DEBUG > 2
-					LogDebug(false, "CheckForAFK - Not Checking General AFK Move as minimum players is not met?");
-#endif
-				}
-			}
-			else
-			{
-#if _DEBUG > 2
-				LogDebug(false, "CheckForAFK - Not Checking General AFK Move as player is already on the spectator team?");
-#endif
-			}
-		}
-		else
-		{
-#if _DEBUG > 2
-			LogDebug(false, "CheckForAFK - Not Checking General AFK Move as move is disabled?");
-#endif
-		}
-
-		new KickPlayers = GetConVarInt(hCvarKickPlayers);
-
-		// Check if AFK Kick is enabled
-		if (KickPlayers > 0)
-		{
-			// Check we have enough minimum players
-			if (bKickPlayers == true)
-			{
-				if ((KickPlayers == 2) && (g_TeamNum == g_sTeam_Index))
-				{
-					// Kicking is set to exclude spectators.
-					// Player is on the spectator team. Spectators should not be kicked.
-#if _DEBUG > 2
-					LogDebug(false, "CheckForAFK - Not Checking General AFK Kick as Client: %d is on the spectator team and we are excluding spectators.", client);
-#endif
-					return Plugin_Continue;
-				}
-				else if ((KickPlayers == 3) && (g_TeamNum != g_sTeam_Index))
-				{
-					// Kicking is set to spectator only.
-					// Player is not on the spectator team? Spectators should only be kicked? This should not happen and would be an error.
-#if _DEBUG > 2
-					LogDebug(false, "CheckForAFK - ERROR: Client: %s has an active timer but should not be moved or kicked? This should probably not happen.", client);
-#endif
-					return Plugin_Continue;
-				}
-				else
-				{
-					// Check Admin Immunity
-					if ( (AdminsImmune == 0) || (AdminsImmune == 3) || (!CheckAdminImmunity(client)) )
-					{
-						new Float:afk_kick_time = GetConVarFloat(hCvarTimeToKick);
-
-						// Is the AFK Kick time greater than 0 seconds?
-						if (afk_kick_time > 0.0)
-						{
-							new Float:afk_kick_timeleft = (afk_kick_time - fAFKTime[client]);
-
-#if _DEBUG > 2
-							LogDebug(false, "CheckForAFK - Kick Time: %f AFK Time: %f AFK Timeleft: %f AFK Warn Time: %f", GetConVarFloat(hCvarTimeToKick), fAFKTime[client], afk_kick_timeleft, GetConVarFloat(hCvarWarnTimeToKick));
-#endif
-
-							// Are we supposed to be warning the client?
-							if ( afk_kick_timeleft <= GetConVarFloat(hCvarWarnTimeToKick) )
-							{
-								// Is there still time to warn the client?
-								if (afk_kick_timeleft > 0.0)
+								else if (AFKTime%AFK_WARNING_INTERVAL == 0) // Warn AFK Player
 								{
-									// Warn the player they are being flagged as AFK.
-#if _DEBUG > 2
-									LogDebug(false, "CheckForAFK - Checking AFK Time (Kick): Client: %d Timeleft: %f", client, afk_kick_timeleft);
+#if _DEBUG > 1
+									LogDebug(false, "Timer_CheckPlayer - Client: %i Checking Move Warning", client);
 #endif
-									new AFKSpawnTimeleft = -1;
-
-									if (iSpawnTime[client] > 0)
-									{
-										new cvarSpawnTime = GetConVarInt(hCvarSpawnTime);
-
-										if (cvarSpawnTime > 0)
-											AFKSpawnTimeleft = cvarSpawnTime - (GetTime() - iSpawnTime[client]);
-									}
-
-									if ((AFKSpawnTimeleft == -1) || (afk_kick_timeleft < AFKSpawnTimeleft))
-									{
-										if (GetConVarBool(hCvarLanguage))
-											AFK_PrintToChat(client, "%T", "Kick_Warning", LANG_SERVER, RoundToFloor(afk_kick_timeleft));
-										else
-											AFK_PrintToChat(client, "%t", "Kick_Warning", RoundToFloor(afk_kick_timeleft));
-									}
+									if ((g_iTimeToMove - AFKTime) <= GetConVarInt(hCvarWarnTimeToMove))
+										AFK_PrintToChat(client, "%t", "Move_Warning", AFKMoveTimeleft);
 									return Plugin_Continue;
 								}
-								else
+								return Plugin_Continue; // Fix for AFK Spawn Kick Notifications
+							}
+						//}
+					}
+				}
+			}
+		}
+
+		int iKickPlayers = GetConVarInt(hCvarKickPlayers);
+		
+		if (iKickPlayers > 0)
+			if (bKickPlayers == true)
+			{
+				if ((iKickPlayers == 2) && (g_iPlayerTeam[client] == g_iSpec_Team)) // Kicking is set to exclude spectators. Player is on the spectator team. Spectators should not be kicked.
+					return Plugin_Continue;
+				else
+				{
+					if ( (g_iPlayerImmunity[client] == AFKImmunity_None) || (g_iPlayerImmunity[client] == AFKImmunity_Move) ) // Check Admin Immunity
+					{
+						if (g_iTimeToKick > 0)
+						{
+							int AFKKickTimeleft = g_iTimeToKick - AFKTime;
+
+#if _DEBUG
+							LogDebug(false, "Timer_CheckPlayer - Client: %i AFK Time: %i Kick Timeleft: %i", client, AFKTime, AFKKickTimeleft);
+#endif
+							if (AFKKickTimeleft >= 0)
+							{
+								if (AFKSpawnTimeleft >= 0)
+									if ( (AFKSpawnTimeleft < AFKKickTimeleft) && !((g_iTimeToMove > 0) && (g_iPlayerImmunity[client] == AFKImmunity_Move)) ) // Spawn time left is less than total AFK time left
+									{
+										if (AFKSpawnTime >= cvarSpawnTime) // Take Action on AFK Spawn Player
+											return KickAFKClient(client);
+										else if (AFKSpawnTime%AFK_WARNING_INTERVAL == 0) // Warn AFK Spawn Player
+										{
+#if _DEBUG > 1
+											LogDebug(false, "Timer_CheckPlayer - Client: %i Checking Spawn Kick Warning AFK Spawn Timeleft: %i", client, AFKSpawnTimeleft);
+#endif
+											if ((cvarSpawnTime - AFKSpawnTime) <= GetConVarInt(hCvarWarnSpawnTime))
+												AFK_PrintToChat(client, "%t", "Spawn_Kick_Warning", AFKSpawnTimeleft);
+											return Plugin_Continue;
+										}
+									}
+
+#if _DEBUG > 1
+								LogDebug(false, "Timer_CheckPlayer - Client: %i AFK Time: %i ConVar Kick Time: %i", client, AFKTime, g_iTimeToKick);
+#endif
+								if (AFKTime >= g_iTimeToKick) // Take Action on AFK Player
 									return KickAFKClient(client);
+								else if (AFKTime%AFK_WARNING_INTERVAL == 0) // Warn AFK Player
+								{
+#if _DEBUG > 1
+									LogDebug(false, "Timer_CheckPlayer - Client: %i Checking Kick Warning", client);
+#endif
+									if ((g_iTimeToKick - AFKTime) <= GetConVarInt(hCvarWarnTimeToKick))
+										AFK_PrintToChat(client, "%t", "Kick_Warning", AFKKickTimeleft);
+									return Plugin_Continue;
+								}
 							}
-						}
-						else
-						{
-							// AFK Kick is enabled but kick time is 0 seconds?
-#if _DEBUG > 2
-							LogDebug(false, "CheckForAFK - Not Checking General AFK Kick as kick time is less than or equal to 0?");
-#endif
-						}
-					}
-				}
-			}
-		}
-	}
-	return Plugin_Continue;
-}
-
-Action:CheckForAFKSpawn(client)
-{
-	new AFKSpawnTime = GetTime() - iSpawnTime[client];
-
-	new g_TeamNum = GetClientTeam(client);
-
-	// Unassigned, Spectator or Dead Player
-	if (IsClientObserver(client))
-		return Plugin_Stop;
-	else
-	{
-		// Normal player
-		if (!CheckSamePosition(client))
-			return Plugin_Stop;
-	}
-
-	new AdminsImmune = GetConVarInt(hCvarAdminsImmune);
-
-	// Check if AFK Move is enabled
-	if (GetConVarBool(hCvarMoveSpec))
-	{
-		// Check we are not moving from Spectator team to Spectator team
-		if (g_TeamNum != g_sTeam_Index)
-		{
-			// Check we have enough minimum players
-			if (bMovePlayers == true)
-			{
-				// Check Admin Immunity
-				if ( (AdminsImmune == 0) || (AdminsImmune == 2) || (!CheckAdminImmunity(client)) )
-				{
-					// Spawn AFK Check
-					new Float:afk_spawn_timeleft = (GetConVarFloat(hCvarSpawnTime) - AFKSpawnTime);
-#if _DEBUG > 2
-					LogDebug(false, "CheckForAFKSpawn - Spawn Time: %f AFK Time: %f AFK Spawn Timeleft: %f AFK Warn Time: %f", GetConVarFloat(hCvarSpawnTime), AFKSpawnTime, afk_spawn_timeleft, GetConVarFloat(hCvarWarnSpawnTime));
-#endif
-
-					// Are we supposed to be warning the client?
-					if ( afk_spawn_timeleft <= GetConVarFloat(hCvarWarnSpawnTime) )
-					{
-						// Is there still time to warn the client?
-						if (afk_spawn_timeleft > 0.0)
-						{
-							// Warn the player they are being flagged as AFK.
-#if _DEBUG > 2
-							LogDebug(false, "CheckForAFKSpawn - Checking AFK Spawn Time (Move): Client: %d Timeleft: %f", client, afk_spawn_timeleft);
-#endif
-							new Float:cvarTimeToMove = GetConVarFloat(hCvarTimeToMove);
-
-							new Float:AFKMoveTimeleft = -1.0;
-
-							if (cvarTimeToMove > 0.0)
-								AFKMoveTimeleft = cvarTimeToMove - fAFKTime[client];
-
-							if ((AFKMoveTimeleft == -1.0) || (afk_spawn_timeleft < AFKMoveTimeleft))
-							{
-								if (GetConVarBool(hCvarLanguage))
-									AFK_PrintToChat(client, "%T", "Spawn_Move_Warning", LANG_SERVER, RoundToFloor(afk_spawn_timeleft));
-								else
-									AFK_PrintToChat(client, "%t", "Spawn_Move_Warning", RoundToFloor(afk_spawn_timeleft));
-							}
-							return Plugin_Continue;
-						}
-						else
-						{
-#if _DEBUG > 2
-							LogDebug(false, "CheckForAFKSpawn - Moving AFK Client: %i to Spectator for Spawn AFK.", client);
-#endif
-
-							// Are we moving player from the Unassigned team AKA team 0?
-							if (g_TeamNum == 0)
-								return MoveAFKClient(client, GetConVarBool(hCvarWarnUnassigned)); // Are we warning unassigned players?
 							else
-								return MoveAFKClient(client);
+								return KickAFKClient(client);
 						}
 					}
 				}
 			}
-			else
-			{
-#if _DEBUG > 2
-				LogDebug(false, "CheckForAFKSpawn - Not Checking Spawn AFK Move as minimum players is not met?");
-#endif
-			}
-		}
-		else
-		{
-#if _DEBUG > 2
-			LogDebug(false, "CheckForAFKSpawn - Not Checking Spawn AFK Move as player is already on the spectator team?");
-#endif
-		}
-	}
-	else
-	{
-#if _DEBUG > 2
-		LogDebug(false, "CheckForAFKSpawn - Not Checking Spawn AFK Move as move is disabled?");
-#endif
 	}
 
-	new KickPlayers = GetConVarInt(hCvarKickPlayers);
-
-	// Check if AFK Kick is enabled
-	if (KickPlayers > 0)
-	{
-		// Check we have enough minimum players
-		if (bKickPlayers == true)
-		{
-			if ((KickPlayers == 2) && (g_TeamNum == g_sTeam_Index))
-			{
-				// Kicking is set to exclude spectators.
-				// Player is on the spectator team. Spectators should not be kicked.
 #if _DEBUG > 2
-				LogDebug(false, "CheckForAFKSpawn - Not Checking Spawn AFK Kick as Client: %d is on the spectator team and we are excluding spectators.", client);
+	LogDebug(false, "Timer_CheckPlayer - Client: %i Plugin_Continue", client);
 #endif
-				return Plugin_Continue;
-			}
-			else if ((KickPlayers == 3) && (g_TeamNum != g_sTeam_Index))
-			{
-				// Kicking is set to spectator only.
-				// Player is not on the spectator team? Spectators should only be kicked? This should not happen and would be an error.
-#if _DEBUG > 2
-				LogDebug(false, "CheckForAFKSpawn - ERROR: Client: %s has an active timer but should not be moved or kicked? This should probably not happen.", client);
-#endif
-				return Plugin_Continue;
-			}
-			else
-			{
-				// Check Admin Immunity
-				if ( (AdminsImmune == 0) || (AdminsImmune == 3) || (!CheckAdminImmunity(client)) )
-				{
-					new Float:afk_spawn_timeleft = (GetConVarFloat(hCvarSpawnTime) - (GetTime() - iSpawnTime[client]));
-
-					// Are we supposed to be warning the client?
-					if ( afk_spawn_timeleft <= GetConVarFloat(hCvarWarnSpawnTime) )
-					{
-						// Is there still time to warn the client?
-						if (afk_spawn_timeleft > 0.0)
-						{
-							// Warn the player they are being flagged as AFK.
-#if _DEBUG > 2
-							LogDebug(false, "CheckForAFK - Checking AFK Spawn Time (Kick): Client: %d Timeleft: %f", client, afk_spawn_timeleft);
-#endif
-							new Float:cvarTimeToKick = GetConVarFloat(hCvarTimeToKick);
-
-							new Float:AFKKickTimeleft = -1.0;
-
-							if (cvarTimeToKick > 0.0)
-								AFKKickTimeleft = cvarTimeToKick - fAFKTime[client];
-
-							if ((AFKKickTimeleft == -1.0) || (afk_spawn_timeleft < AFKKickTimeleft))
-							{
-								if (GetConVarBool(hCvarLanguage))
-									AFK_PrintToChat(client, "%T", "Spawn_Kick_Warning", LANG_SERVER, RoundToFloor(afk_spawn_timeleft));
-								else
-									AFK_PrintToChat(client, "%t", "Spawn_Kick_Warning", RoundToFloor(afk_spawn_timeleft));
-							}
-							return Plugin_Continue;
-						}
-						else
-							return KickAFKClient(client);
-					}
-				}
-			}
-		}
-	}
 	return Plugin_Continue;
 }
 
 
-// Move AFK Client to Spectator Team
-Action:MoveAFKClient(client, bool:Advertise=true)
+// Move/Kick Functions
+Action MoveAFKClient(int client, bool Advertise=true) // Move AFK Client to Spectator Team
 {
 #if _DEBUG
 	LogDebug(false, "MoveAFKClient - Client: %i has been moved to Spectator.", client);
 #endif
-	decl String:f_Name[MAX_NAME_LENGTH];
+	Action ForwardResult = Plugin_Continue;
+
+	if (g_iSpawnTime[client] != -1)
+		ForwardResult = Forward_OnAFKEvent("afk_spawn_move", client);
+	else
+		ForwardResult = Forward_OnAFKEvent("afk_move", client);
+
+	if (ForwardResult != Plugin_Continue)
+	{
+		if (g_bLogWarnings)
+		{
+			char Action_Name[32];
+			Action_Name = ActionToString(ForwardResult);
+			LogToFile(AFKM_LogFile, "AFK Manager Event: MoveAFKClient has been requested to: %s by an external plugin this action will affect the event outcome.", Action_Name);
+		}
+		return ForwardResult;
+	}
+
+	char f_Name[MAX_NAME_LENGTH];
 	GetClientName(client, f_Name, sizeof(f_Name));
 
-	// Are we announcing the move to everyone?
-	if (Advertise)
+	if (Advertise) // Are we announcing the move to everyone?
 	{
-		if (GetConVarBool(hCvarLanguage))
-			Move_PrintToChat(client, "%T", "Move_Announce", LANG_SERVER, f_Name);
+		int Announce = GetConVarInt(hCvarMoveAnnounce);
+
+		if (Announce == 0)
+			AFK_PrintToChat(client, "%t", "Move_Announce", f_Name);
+		else if (Announce == 1)
+			AFK_PrintToChat(0, "%t", "Move_Announce", f_Name);
 		else
-			Move_PrintToChat(client, "%t", "Move_Announce", f_Name);
+		{
+			for(int i = 1; i <= MaxClients; i++)
+				if (IsClientConnected(i))
+					if (IsClientInGame(i))
+						if ((i == client) || (GetUserAdmin(i) != INVALID_ADMIN_ID))
+							AFK_PrintToChat(i, "%t", "Move_Announce", f_Name);
+		}
 	}
 
 	if (GetConVarBool(hCvarLogMoves))
 		LogToFile(AFKM_LogFile, "%T", "Move_Log", LANG_SERVER, client);
 
-	// Kill Player so round ends properly, this is Valve's normal method.
-	if (CSTRIKE)
+	if ((CSTRIKE) || (CSGO) || GESOURCE) // Kill Player so round ends properly, this is Valve's normal method.
+	{
+		if (g_iPlayerTeam[client] == 0)
+			FakeClientCommand(client, "joingame");
+		else
+			ForcePlayerSuicide(client);
+	}
+	else if (GESOURCE)
 		ForcePlayerSuicide(client);
 
 	if (TF2)
 	{
-		// Fix for Intelligence
-		new iEnt = -1;
+		// Fix for TF2 Intelligence
+		int iEnt = -1;
 		while ((iEnt = FindEntityByClassname(iEnt, "item_teamflag")) > -1) {
 			if (IsValidEntity(iEnt))
 			{
@@ -3278,151 +2381,150 @@ Action:MoveAFKClient(client, bool:Advertise=true)
 			}
 		}
 
-		if (bTF2Arena)
+		if (g_bTF2Arena)
 		{
-#if _DEBUG > 2
-			LogDebug(false, "MoveAFKClient - TF2 Arena Mode");
-#endif
 			ForcePlayerSuicide(client);
 			// Arena Spectator Fix by Rothgar
-			SetEntProp(client, Prop_Send, "m_nNextThinkTick", -1);
+			//SetEntProp(client, Prop_Send, "m_nNextThinkTick", -1);
 			SetEntProp(client, Prop_Send, "m_iDesiredPlayerClass", 0);
 			SetEntProp(client, Prop_Send, "m_bArenaSpectator", 1);
-			ChangeClientTeam(client, g_sTeam_Index);
+			ChangeClientTeam(client, g_iSpec_Team);
 /*
 			if (GetConVarBool(FindConVar("tf_arena_use_queue")))
 				FakeClientCommand(client,"jointeam %d", "spectatearena");
 			else
-				FakeClientCommand(client,"jointeam %d", g_sTeam_Index);
+				FakeClientCommand(client,"jointeam %d", g_iSpec_Team);
 */
 		} else {
 			ForcePlayerSuicide(client);
-			// Move AFK Player to Spectator
-			ChangeClientTeam(client, g_sTeam_Index);
+			ChangeClientTeam(client, g_iSpec_Team); // Move AFK Player to Spectator
 		}
-	} else {
-		// Move AFK Player to Spectator
-		ChangeClientTeam(client, g_sTeam_Index);
-	}
-
-/*
-	// Check if spectators are supposed to be kicked.
-	new KickPlayers = GetConVarInt(hCvarKickPlayers);
-	if( (KickPlayers == 0) || (KickPlayers == 2) )
-	{
-#if _DEBUG
-		LogDebug(false, "Spectators should not be kicked due to settings? Stop Timer?");
-#endif
-
-		ResetPlayer(client); // Reset Client Variables because timer will halt?
-		return Plugin_Stop;
 	}
 	else
-*/
-	return Plugin_Continue;
-}
+		ChangeClientTeam(client, g_iSpec_Team); // Move AFK Player to Spectator
 
+	if (CSGO)
+	{
+		SetEntData(client, FindSendPropInfo("CCSPlayer", "m_unMusicID") - 45, 0, 1, true); // Fix by Asherkin
+		//SetEntData(client, FindSendPropInfo("CCSPlayer", "m_unMusicID") - 21, 0, 1, true); // Fix by Asherkin
+	}
 
-// Kick AFK Client
-Action:KickAFKClient(client)
+	return Plugin_Continue; // Check This?
+}		
+
+Action KickAFKClient(int client) // Kick AFK Client
 {
-	decl String:f_Name[MAX_NAME_LENGTH];
+	Action ForwardResult = Forward_OnAFKEvent("afk_kick", client);
+
+	if (ForwardResult != Plugin_Continue)
+	{
+		if (g_bLogWarnings)
+		{
+			char Action_Name[32];
+			Action_Name = ActionToString(ForwardResult);
+			LogToFile(AFKM_LogFile, "AFK Manager Event: KickAFKClient has been requested to: %s by an external plugin this action will affect the event outcome.", Action_Name);
+		}
+		return ForwardResult;
+	}
+
+	char f_Name[MAX_NAME_LENGTH];
 	GetClientName(client, f_Name, sizeof(f_Name));
 
-	
-	if (GetConVarBool(hCvarLanguage))
-		Kick_PrintToChat("%T", "Kick_Announce", LANG_SERVER, f_Name);
-	else
-		Kick_PrintToChat("%t", "Kick_Announce", f_Name);
+#if _DEBUG
+	LogDebug(false, "KickAFKClient - Kicking player %s for being AFK.", f_Name);
+#endif
+
+	int Announce = GetConVarInt(hCvarKickAnnounce);
+	if (Announce == 1)
+		AFK_PrintToChat(0, "%t", "Kick_Announce", f_Name);
+	else if (Announce == 2)
+	{
+		for(int i = 1; i <= MaxClients; i++)
+			if (IsClientConnected(i))
+				if (IsClientInGame(i))
+					if (GetUserAdmin(i) != INVALID_ADMIN_ID)
+						AFK_PrintToChat(i, "%t", "Kick_Announce", f_Name);
+	}
 
 	if (GetConVarBool(hCvarLogKicks))
 		LogToFile(AFKM_LogFile, "%T", "Kick_Log", LANG_SERVER, client);
 
-	// Kick AFK Player
-#if _DEBUG
-	LogDebug(false, "KickAFKClient - Kicking player %s for being AFK.", f_Name);
-#endif
-	if (GetConVarBool(hCvarPrefixShort))
-	{
-		if (GetConVarBool(hCvarLanguage))
-			KickClient(client, "[AFK] %T", "Kick_Message", LANG_SERVER);
-		else
-			KickClient(client, "[AFK] %t", "Kick_Message");
-	}
+	if (g_bForceLanguage)
+		KickClient(client, "[%s] %T", g_sPrefix, "Kick_Message", LANG_SERVER);
 	else
-	{
-		if (GetConVarBool(hCvarLanguage))
-			KickClient(client, "[AFK Manager] %T", "Kick_Message", LANG_SERVER);
-		else
-			KickClient(client, "[AFK Manager] %t", "Kick_Message");
-	}
+		KickClient(client, "[%s] %t", g_sPrefix, "Kick_Message");
 	return Plugin_Continue;
 }
 
+// Admin/Immunity Functions
 
-// Check Admin Immunity
-bool:CheckAdminImmunity(client)
+void ChangeImmunity(int type) // Change Immunity Type for all Admins
 {
-#if _DEBUG > 1
-	LogDebug(false, "CheckAdminImmunity - Checking client: %i for admin immunity.", client);
+	for (int i = 1; i <= MaxClients; i++)
+		if (IsValidClient(i))
+			if (CheckAdminImmunity(i))
+				SetPlayerImmunity(i, type);
+/*
+	for (int i = 1; i <= MaxClients; i++)
+		if (IsClientConnected(i))
+			if (IsClientInGame(i))
+				if (CheckAdminImmunity(i))
+					SetPlayerImmunity(i, type);
+*/
+}
+
+bool CheckAdminImmunity(int client) // Check Admin Immunity
+{
+	int iUserFlagBits = GetUserFlagBits(client);
+
+#if _DEBUG
+	LogDebug(false, "CheckAdminImmunity - Checking client: %i for admin immunity Client flag bits: %i", client, iUserFlagBits);
 #endif
 
-	decl String:name[MAX_NAME_LENGTH];
-	GetClientName(client, name, sizeof(name));
-
-	new AdminId:admin = GetUserAdmin(client);
-
-	// Check if player is an admin.
-	if(admin != INVALID_ADMIN_ID)
+	if (iUserFlagBits > 0) // Check if player is an admin
 	{
-		decl String:flags[8];
-		decl AdminFlag:flag;
+		char sFlags[32];
+		GetConVarString(hCvarAdminsFlag, sFlags, sizeof(sFlags));
 
-		GetConVarString(hCvarAdminsFlag, flags, sizeof(flags));
-
-		// Are we checking for specific admin flags?
-		if (!StrEqual(flags, "", false))
-		{
-			// Is the admin flag we are checking valid?
-			if (!FindFlagByChar(flags[0], flag))
-			{
-#if _DEBUG > 1
-				LogDebug(false, "CheckAdminImmunity - ERROR: Admin Immunity flag is not valid? %s", flags[0]);
-#endif
-			}
-			else
-			{
-				// Check if the admin has the correct immunity flag.
-				if (!GetAdminFlag(admin, flag))
-				{
-#if _DEBUG > 1
-					LogDebug(false, "CheckAdminImmunity - Client: %s has a valid Admin ID but does NOT have required immunity flag %s admin is NOT immune.", name, flags[0]);
-#endif
-				}
-				else
-				{
-#if _DEBUG > 1
-					LogDebug(false, "CheckAdminImmunity - Client: %s has required immunity flag %s admin is immune.", name, flags[0]);
-#endif
-					return true;
-				}
-			}
-		}
-		else
-		{
-			// Player is an admin, we don't care about flags.
-#if _DEBUG > 1
-			LogDebug(false, "CheckAdminImmunity - Client: %s is a valid Admin and is immune.", name);
-#endif
+		if (StrEqual(sFlags, "")) // No admin flags set
 			return true;
+		else if (iUserFlagBits & (ReadFlagString(sFlags)|ADMFLAG_ROOT) > 0) // Compare Flag Bits
+			return true;
+	}
+	return false;
+}
+
+void SetPlayerImmunity(int client, int type, bool AFKImmunityType = false) // Set Admin Immunity
+{
+	if ( (AFKImmunityType) && ((view_as<AFKImmunity>(type) >= AFKImmunity_None) && (view_as<AFKImmunity>(type) <= AFKImmunity_Full)) )
+	{
+		g_iPlayerImmunity[client] = view_as<AFKImmunity>(type);
+
+		if (g_iPlayerImmunity[client] == AFKImmunity_Full)
+			ResetAFKTimer(client);
+		else
+			InitializeAFK(client);
+	}
+	else if ( (!AFKImmunityType) && ((type >= 0) && (type <= 3)) )
+	{
+		switch (type)
+		{
+			case 1: // COMPLETE IMMUNITY
+			{
+				g_iPlayerImmunity[client] = AFKImmunity_Full;
+				ResetAFKTimer(client);
+				return;
+			}
+			case 2: // KICK IMMUNITY
+				g_iPlayerImmunity[client] = AFKImmunity_Kick;
+			case 3: // MOVE IMMUNITY
+				g_iPlayerImmunity[client] = AFKImmunity_Move;
+			default: // NO IMMUNITY
+				g_iPlayerImmunity[client] = AFKImmunity_None;
 		}
+		InitializeAFK(client);
 	}
 	else
-	{
-#if _DEBUG > 1
-		LogDebug(false, "CheckAdminImmunity - Client: %s has an invalid Admin ID.", name);
-#endif
-	}
-
-	return false;
+		if (g_bLogWarnings)
+			LogToFile(AFKM_LogFile, "SetAdminImmunity - AFK Manager Player Immunity was asked to set an invalid type: %i for client: %i", type, client);
 }

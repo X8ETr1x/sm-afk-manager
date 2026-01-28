@@ -579,28 +579,28 @@ I moved plugin to 3.x now, decided this plugin should be for the most part compl
 
 - Added new cvar to determine which players should be kicked (All, Spectators, Not Spectators)
  
-## [2.5.7-compat]
+## [2.5.7-compat] 2008-11-17
 
 ### Fixed
 
 - Fixed Admin immunity not working properly, Thanks to Tsunami and FlyingMongoose changed OnClientPutInServer to OnClientPostAdminCheck.
 - Also changed cvars please delete the config file so it automatically generates or update with the new commands.
 
-## [2.5.6-compat]
+## [2.5.6-compat] 2008-11-16
 
 ### Changed
 
 - Reverted to a "compat" build which works in older SourceMod releases.
 - Also added a few more debug messages, optimized some code and decided to stop timers running on Admins at all.
 
-## [2.5.5]
+## [2.5.5] 2008-11-07
 
 ### Fixed
 
 - Fixed some errors that occured with timers starting before a player was fully in the game during map changes.
 - Also added a few more debug messages.
 
-## [2.5.4]
+## [2.5.4] 2008-11-06
 
 ### Fixed
 
@@ -614,13 +614,13 @@ Determined all these things trying to make this plugin work with 1.0.x branch wa
 
 - I have changed the MaxClient changes back, made a note of the required SourceMod version and this plugin will not work with 1.0.x
 
-## [2.5.2]
+## [2.5.2] 2008-11-02
 
 ### Changed
 
 - Changed the MaxClients variable to use older method that should be supported by 1.0 SourceMod branch and added new Debug line.
 
-## [2.5.1]
+## [2.5.1] 2008-11-01
 
 ### Changed
 

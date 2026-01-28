@@ -88,7 +88,7 @@ stock TF2GameMode TF2_DetectGameMode()
 }
 
 // Defines
-#define PLUGIN_VERSION				"4.4.0"
+#define PLUGIN_VERSION				"4.4.1"
 
 #define AFK_WARNING_INTERVAL			5
 #define AFK_CHECK_INTERVAL			1.0
@@ -2329,3 +2329,4 @@ void SetPlayerImmunity(int client, int type, bool AFKImmunityType = false) // Se
 		if (g_bLogWarnings)
 			LogToFile(AFKM_LogFile, "SetAdminImmunity - AFK Manager Player Immunity was asked to set an invalid type: %i for client: %i", type, client);
 }
+

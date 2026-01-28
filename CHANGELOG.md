@@ -401,58 +401,229 @@ This plugin now requires SourceMod 1.3.1+
 
 - Fixed a small problem with the sm_afk_spec command possibly not killing timers properly if Spectator kick was disabled?
 
+## [3.2.1]
 
+### Added
 
+- Added new command by request sm_afk_spec which will force a player to the spectator team. Requires new translation file and if possible updates to other languages.
 
-* 2.5b - Took Liam's "Basic AFK Plugin" version 2.5 and modified it to work with Synergy, along the way found there was some bugs looping through all players through a single timer and so I have made this plugin create a separate timer for each individual player. Timers are dynamic as they will be created/destroyed based on number of players in game. Also removed seemingly un-necessary additional eye checks and tried to make spectator checking more mod-independent by searching for team names rather than set ID numbers. Finally I created a player warning count-down from 30 seconds before kick in TIMER_INTERVAL interval which is default every 5 seconds. Example: 30,25,20,15,10,5 seconds before kick the player is warned.
-* 2.5c - Changed the MaxClients variable to use older method that should be supported by 1.0 SourceMod branch and added new Debug line.
-* 2.5d - Determined all these things trying to make this plugin work with 1.0.x branch was most likely not going to work due to some necessary changed needed for new mods such as Synergy which are reliant on features only available in the 1.1 trunk. I have changed the MaxClient changes back, made a note of the required SourceMod version and this plugin will not work with 1.0.x
-* 2.5e - Fixed Late Start Error messages? and disabled Debug by default.
-* 2.5f - Fixed some errors that occured with timers starting before a player was fully in the game during map changes. Also added a few more debug messages.
-* 2.5i-compat - Reverted to a "compat" build which works in older SourceMod releases. Also added a few more debug messages, optimized some code and decided to stop timers running on Admins at all.
-* 2.5j-compat - Fixed Admin immunity not working properly, Thanks to Tsunami and FlyingMongoose changed OnClientPutInServer to OnClientPostAdminCheck. Also changed cvars please delete the config file so it automatically generates or update with the new commands.
-* 2.5k-compat - Added new cvar to determine which players should be kicked (All, Spectators, Not Spectators)
-* 2.5l-compat - Added Additional checks for spawn and team change event to ensure a client is in the game? Should eliminate odd occurrences where id 0 (console) was calling these events and causing errors?
-* 2.5m-compat - Fixed SourceMod bug with checking for spectator team not being case insensitive? https://bugs.alliedmods.net/show_bug.cgi?id=3446
-* 2.5n-compat - Take 2 of fixing id 0 being called for what I believe bots? Functions now check for an id > 0. Tidy'd up Debug Logging messages.
-* 2.5o-compat - Removed FindTeamByName() calls because they seemed to error on Team ID's that I believe should be valid? In any case thanks goes to predcrab for suggesting IsClientObserver() which will work for most instances but not all but allowed me to get further for mods that threw errors on FindTeamByName().
-* Added some checks for Insurgency to get it to work, Eye Angles doesn't currently work for Insurgency (causes crashes) so for now only location is checked.
-* Also have to manually kill players after changing their team at least for Insurgency when players are moved to spec, let me know if it doesn't work for other mods.Changed the Spectator team check back to a ugly static team id of 1 except for Insurgency so far which I have found it uses an id of 3. Let me know if the Spectator move is wrong for other mods.
-* 3.0-compat - moved plugin to 3.x now, decided this plugin should be for the most part complete now? Added in a new cvar sm_afk_admins_flag which allows you to specify which admin flag to check to make certain admins immune.
-* 3.0.1-compat - Fixed a bug with timers not closing properly which could have caused issues as a timer was closed before it was finished. Have changed a few of the functions to hopefully fix this. Also due to request have added in a death hook to reset player timers once they have killed someone for mods like Insurgency where it can't check player angles.
-* 3.0.2-compat - Added new translation file to make the plugin multi-lingual capable? Added some Turret/Entity use checks for Synergy to check eye angles when in a static location using turret machine guns etc. Started looking into Insurgency Wave counts. Added Spectator move warning message.
-* 3.0.3-compat - Added two new convars for the time before players should be warned for move or kick. Removed a print message about players being kicked from the server as the actual kick message shows up in chat as well.
-* 3.0.4-compat - Quick fix for missing "!" in a admin check which would have caused it to always return false.
-* 3.0.5-compat - With some basic checking I have found the free-look mode is different on OB engine vs Non-OB, If you find this is not the case let me know but until then without any more data I will assume this is correct. Also thanks to Brizad who has suggested an additional Stalemate round check for TF2 which is also included. Updated Phrases file with TF2.
-* 3.0.6-compat - Changed convar flags as ADMFLAG_ROOT (thanks for Tsunami for pointing this out)
-* 3.0.7-compat - Fixed a bug with Timers sometimes failing and with Stalemate round causing timers to kill instead of pause. Thanks to Antithasys for help in fixing general timer closing issues.
-* 3.0.8-compat - Fixed problem with sm_afk_kick_players (Was checking for Bool instead of Int)
-* 3.0.9-compat - Fixed bug with timer executing a function twice causing the script to run twice as fast. Also fixed the immunity description thanks to retsam for helping fix both problems.
-* Updated translation file to include Danish thanks to OziOn for the submission.
-* 3.0.10-compat - Added dead player exclusion variable. Automatically disabled TF2 AFK cvar if it's enabled. Added a few additional checks to prepare for future translation updates.
-* Updated translation file to include French thanks to Cadav0r for the submission.
-* Updated translation file to include Russian thanks to Snake60 for the submission.
-* Updated translation file in correct format? UTF-8 without BOM. Thanks to niask for pointing this out.
-* 3.0.12-compat - Added extra immunity options due to multiple requests, you can now change sm_afk_admins_immune to determine whether admins are fully immune, immune to being kick or immune to being moved.
-* 3.1.0-compat - Fixed a bug with partial admin immunity causing the plugin to make everyone immune.
-* 3.1.2-compat - Fixed a bug with timers getting reset when moved to Spectator team and also people sitting at MOTD not being kicked. Thanks to Atreus for finding the problem and helping test the fix.
-* 3.1.3-compat - un-commented Kick announce line, thought this was commented previously because of double-printing, however Atreus believes after a map change the double-print disappears. Also made printed messages more consistent, so you will know they are from the AFK Manager.
-* 3.1.4-compat - Fixed bug with plugin creating two timers for each player causing everything to happen twice as fast. Mostly due to plugin which automatically puts players on a team as soon as they join but could potentially happen in other scenario's as well. Previously initialize function did not check for existing timers as did not think this was necessary. Thanks to dann for providing info.
-* Updated translation file to include Polish thanks to Zuko for the submission.
-* Updated Russian translation file thanks to SelaX.
-* Updated French translation file with proper accents thanks to Cadav0r.
+## [3.2.0]
 
+This version is no longer a "compat" build, meaning it will not compile on SourceMod 1.0.x anymore, you will need the latest Stable SourceMod version or higher (Should compile on anything higher than 1.1.x).
 
-Previous "non-compat" version:
+I would like to thank Atreus and his players for helping test numerous versions of the AFK Manager to try and fix the Arena issues. Made some good progress with this. I would also like to thank predcrab for in the end showing me how I could look at all entity changes for a given entity. With this I was able to compare my move function against the proper one to see differences of a few core entities.
 
-* 3.2.0+ - This version is no longer a "compat" build, meaning it will not compile on SourceMod 1.0.x anymore, you will need the latest Stable SourceMod version or higher (Should compile on anything higher than 1.1.x).
-New features/fixes in this release:
+### Changed
+
 - Disable the AFK Manager on OnMapEnd() and Re-enable on OnMapStart()
 - Now hooking TF2 WaitingForPlayers at start of map and disables the AFK Manager during this time.
 - Now hooking TF2 Arena mode properly (Hopefully) to implement certain Hooks/Fixes due to valve majorly fucking this up.
 - After a LONG time of testing and checking just what the hell Valve broke when implementing a very stupidly designed "Arena Spectator" mode which uses weird player properties to deem whether a player is an actual spectator or a "Waiting to play" person, which I think is very stupid, they should have made it the other way around imo so that spectator is normal and "waiting to play" required changes. However after extensive testing I think I have finally found a work-around to fix this.
 
-I would like to thank Atreus and his players for helping test numerous versions of the AFK Manager to try and fix the Arena issues. Made some good progress with this. I would also like to thank predcrab for in the end showing me how I could look at all entity changes for a given entity. With this I was able to compare my move function against the proper one to see differences of a few core entities.
+## [3.1.4-compat]
 
-* 3.2.1 - Added new command by request sm_afk_spec which will force a player to the spectator team. Requires new translation file and if possible updates to other languages.
+### Changed 
 
+- Fixed bug with plugin creating two timers for each player causing everything to happen twice as fast. Mostly due to plugin which automatically puts players on a team as soon as they join but could potentially happen in other scenario's as well. Previously initialize function did not check for existing timers as did not think this was necessary. Thanks to dann for providing info.
+- Updated translation file to include Polish thanks to Zuko for the submission.
+- Updated Russian translation file thanks to SelaX.
+- Updated French translation file with proper accents thanks to Cadav0r.
+
+## [3.1.3-compat]
+
+### Changed
+
+- Un-commented Kick announce line, thought this was commented previously because of double-printing, however Atreus believes after a map change the double-print disappears.
+- Also made printed messages more consistent, so you will know they are from the AFK Manager.
+
+## [3.1.2-compat]
+
+### Fixed
+
+- Fixed a bug with timers getting reset when moved to Spectator team and also people sitting at MOTD not being kicked. Thanks to Atreus for finding the problem and helping test the fix.
+
+## [3.1.0-compat]
+
+### Fixed
+
+- Fixed a bug with partial admin immunity causing the plugin to make everyone immune.
+
+## [3.0.12-compat]
+
+### Added
+
+- Added extra immunity options due to multiple requests, you can now change sm_afk_admins_immune to determine whether admins are fully immune, immune to being kick or immune to being moved.
+
+## [3.0.10-compat]
+
+### Added
+
+- Added dead player exclusion variable. Automatically disabled TF2 AFK cvar if it's enabled. Added a few additional checks to prepare for future translation updates.
+
+### Changed
+
+- Updated translation file to include French thanks to Cadav0r for the submission.
+- Updated translation file to include Russian thanks to Snake60 for the submission.
+- Updated translation file in correct format? UTF-8 without BOM. Thanks to niask for pointing this out.
+
+## [3.0.9-compat]
+
+### Fixed
+
+- Fixed bug with timer executing a function twice causing the script to run twice as fast. Also fixed the immunity description thanks to retsam for helping fix both problems.
+
+### Changed
+
+* Updated translation file to include Danish thanks to OziOn for the submission.
+
+## [3.0.8-compat]
+
+### Fixed
+
+- Fixed problem with sm_afk_kick_players (Was checking for Bool instead of Int)
+
+## [3.0.7-compat]
+
+### Fixed
+
+- Fixed a bug with Timers sometimes failing and with Stalemate round causing timers to kill instead of pause. Thanks to Antithasys for help in fixing general timer closing issues.
+
+## [3.0.6-compat]
+
+### Changed
+
+- Changed convar flags as ADMFLAG_ROOT (thanks for Tsunami for pointing this out)
+
+## [3.0.5-compat]
+
+### Changed
+
+- With some basic checking I have found the free-look mode is different on OB engine vs Non-OB, If you find this is not the case let me know but until then without any more data I will assume this is correct.
+- Also thanks to Brizad who has suggested an additional Stalemate round check for TF2 which is also included. Updated Phrases file with TF2.
+
+## [3.0.4-compat]
+
+### Fixed
+
+- Quick fix for missing "!" in a admin check which would have caused it to always return false.
+ 
+## [3.0.3-compat]
+
+### Added
+
+- Added two new convars for the time before players should be warned for move or kick.
+
+### Removed
+
+- Removed a print message about players being kicked from the server as the actual kick message shows up in chat as well.
+
+## [3.0.2-compat] 
+
+### Added
+
+- Added new translation file to make the plugin multi-lingual capable?
+- Added some Turret/Entity use checks for Synergy to check eye angles when in a static location using turret machine guns etc.
+- Started looking into Insurgency Wave counts.
+- Added Spectator move warning message.
+
+## [3.0.1-compat]
+
+### Fixed
+
+- Fixed a bug with timers not closing properly which could have caused issues as a timer was closed before it was finished. Have changed a few of the functions to hopefully fix this.
+- Also due to request have added in a death hook to reset player timers once they have killed someone for mods like Insurgency where it can't check player angles.
+
+## [3.0.0-compat]
+
+I moved plugin to 3.x now, decided this plugin should be for the most part complete now?
+
+### Added
+
+- Added in a new cvar sm_afk_admins_flag which allows you to specify which admin flag to check to make certain admins immune.
+
+## [2.5.12-compat]
+
+### Added
+
+- Added some checks for Insurgency to get it to work, Eye Angles doesn't currently work for Insurgency (causes crashes) so for now only location is checked. Also have to manually kill players after changing their team at least for Insurgency when players are moved to spec, let me know if it doesn't work for other mods.
+
+### Changed
+
+- Changed the Spectator team check back to a ugly static team id of 1 except for Insurgency so far which I have found it uses an id of 3. Let me know if the Spectator move is wrong for other mods.
+
+### Removed
+- Removed FindTeamByName() calls because they seemed to error on Team ID's that I believe should be valid? In any case thanks goes to predcrab for suggesting IsClientObserver() which will work for most instances but not all but allowed me to get further for mods that threw errors on FindTeamByName().
+
+## [2.5.11-compat]
+
+### Fixed
+
+- Take 2 of fixing id 0 being called for what I believe bots? Functions now check for an id > 0.
+- Tidy'd up Debug Logging messages.
+
+## [2.5.10-compat]
+
+### Fixed
+
+- Fixed SourceMod bug with checking for spectator team not being case insensitive? https://bugs.alliedmods.net/show_bug.cgi?id=3446
+
+## [2.5.9-compat]
+
+### Added
+
+- Added Additional checks for spawn and team change event to ensure a client is in the game? Should eliminate odd occurrences where id 0 (console) was calling these events and causing errors?
+
+## [2.5.8-compat]
+
+### Added
+
+- Added new cvar to determine which players should be kicked (All, Spectators, Not Spectators)
+ 
+## [2.5.7-compat]
+
+### Fixed
+
+- Fixed Admin immunity not working properly, Thanks to Tsunami and FlyingMongoose changed OnClientPutInServer to OnClientPostAdminCheck.
+- Also changed cvars please delete the config file so it automatically generates or update with the new commands.
+
+## [2.5.6-compat]
+
+### Changed
+
+- Reverted to a "compat" build which works in older SourceMod releases.
+- Also added a few more debug messages, optimized some code and decided to stop timers running on Admins at all.
+
+## [2.5.5]
+
+### Fixed
+
+- Fixed some errors that occured with timers starting before a player was fully in the game during map changes.
+- Also added a few more debug messages.
+
+## [2.5.4]
+
+### Fixed
+
+- Fixed Late Start Error messages? and disabled Debug by default.
+
+## [2.5.3]
+
+Determined all these things trying to make this plugin work with 1.0.x branch was most likely not going to work due to some necessary changed needed for new mods such as Synergy which are reliant on features only available in the 1.1 trunk. 
+
+### Changed
+
+- I have changed the MaxClient changes back, made a note of the required SourceMod version and this plugin will not work with 1.0.x
+
+## [2.5.2]
+
+### Changed
+
+- Changed the MaxClients variable to use older method that should be supported by 1.0 SourceMod branch and added new Debug line.
+
+## [2.5.1]
+
+### Changed
+
+- Took Liam's "Basic AFK Plugin" version 2.5 and modified it to work with Synergy, along the way found there was some bugs looping through all players through a single timer and so I have made this plugin create a separate timer for each individual player. Timers are dynamic as they will be created/destroyed based on number of players in game.
+- Also removed seemingly un-necessary additional eye checks and tried to make spectator checking more mod-independent by searching for team names rather than set ID numbers.
+- Finally I created a player warning count-down from 30 seconds before kick in TIMER_INTERVAL interval which is default every 5 seconds. Example: 30,25,20,15,10,5 seconds before kick the player is warned.

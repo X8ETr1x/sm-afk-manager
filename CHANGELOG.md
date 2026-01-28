@@ -1,5 +1,25 @@
 # Changelog
 
+## [4.4.0] 2026-01-28
+
+### Changed
+
+- Updated AutoExecConfig to follow file naming standards.
+- - General formatting improvements.
+
+### Fixed
+
+- Added missing braces in if statements.
+- Fixed an issue where a function was attempting to return an array type object.
+- Fixed missing new declarations.
+
+### Removed
+
+- Removed auto-updater code.
+- Removed unused and commented code.
+
+## [4.3.0]
+
 ## [4.2.5] 2021-09-06
 
 ### Fixed

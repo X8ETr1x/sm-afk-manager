@@ -1,6 +1,6 @@
 # Changelog
 
-## [4.2.5] 
+## [4.2.5] 2021-09-06
 
 ### Fixed
 - Plugin now checks minimum players required when variable changes in addition to client connect/disconnects.
